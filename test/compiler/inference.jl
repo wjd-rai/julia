@@ -2149,6 +2149,284 @@ end
     end |> only === Int
 end
 
+# type-based alias analysis
+# =========================
+# `MustAlias` propagates constraints imposed on aliased fields
+
+struct AliasableField{T}
+    f::T
+end
+struct AliasableFields{S,T}
+    f1::S
+    f2::T
+end
+mutable struct AliasableConstField{S,T}
+    const f1::S
+    f2::T
+end
+
+# lattice
+# -------
+
+import Core.Compiler: MustAlias, Const, PartialStruct, ⊑, tmerge
+@test (MustAlias(2, AliasableField{Any}, 1, Int) ⊑ Int)
+@test !(Int ⊑ MustAlias(2, AliasableField{Any}, 1, Int))
+@test (Int ⊑ MustAlias(2, AliasableField{Any}, 1, Any))
+@test (Const(42) ⊑ MustAlias(2, AliasableField{Any}, 1, Int))
+@test !(MustAlias(2, AliasableField{Any}, 1, Any) ⊑ Int)
+@test tmerge(MustAlias(2, AliasableField{Any}, 1, Any), Const(nothing)) === Any
+@test tmerge(MustAlias(2, AliasableField{Any}, 1, Int), Const(nothing)) === Union{Int,Nothing}
+@test tmerge(Const(nothing), MustAlias(2, AliasableField{Any}, 1, Any)) === Any
+@test tmerge(Const(nothing), MustAlias(2, AliasableField{Any}, 1, Int)) === Union{Int,Nothing}
+@test Core.Compiler.isa_tfunc(MustAlias(2, AliasableField{Any}, 1, Bool), Const(Bool)) === Const(true)
+@test Core.Compiler.isa_tfunc(MustAlias(2, AliasableField{Any}, 1, Bool), Type{Bool}) === Const(true)
+@test Core.Compiler.isa_tfunc(MustAlias(2, AliasableField{Any}, 1, Int), Type{Bool}) === Const(false)
+@test Core.Compiler.ifelse_tfunc(MustAlias(2, AliasableField{Any}, 1, Bool), Int, Int) === Int
+@test Core.Compiler.ifelse_tfunc(MustAlias(2, AliasableField{Any}, 1, Int), Int, Int) === Union{}
+
+maybeget_mustalias_tmerge(x::AliasableField) = x.f
+maybeget_mustalias_tmerge(x) = x
+@test Base.return_types((Union{Nothing,AliasableField{Any}},)) do x
+    isa(maybeget_mustalias_tmerge(x)#=::Any, not MustAlias=#, Int) && throw()
+    x
+end |> only === Union{Nothing,AliasableField{Any}}
+
+# isa constraint
+# --------------
+
+# simple intra-procedural case
+@test Base.return_types((AliasableField,)) do a
+    if isa(getfield(a, :f), Int)
+        return getfield(a, :f)
+    end
+    return 0
+end |> only === Int
+@test Base.return_types((AliasableField,)) do a
+    if isa(getfield(a, 1), Int)
+        return getfield(a, 1)
+    end
+    return 0
+end |> only === Int
+@test Base.return_types((AliasableField{Union{Some{Int},Nothing}},)) do a
+    if isa(getfield(a, 1), Some)
+        return getfield(a, 1)
+    end
+    throw()
+end |> only === Some{Int}
+@test Base.return_types((Tuple{Any},)) do t
+    if isa(getfield(t, 1), Int)
+        return getfield(t, 1)
+    end
+    return 0
+end |> only === Int
+@test Base.return_types((Any,)) do a
+    x = AliasableFields(a, 0)     # x::PartialStruct(AliasableFields, Any[Any, Const(0)])
+    if isa(getfield(x, :f1), Int) # x::PartialStruct(AliasableFields, Any[Int, Const(0)])
+        return getfield(x, :f1)
+    end
+    return 0
+end |> only === Int
+@test Base.return_types((Any,Any)) do a, b
+    x = AliasableFields(a, b)         # x::AliasableFields
+    if isa(getfield(x, :f1), Int)     # x::PartialStruct(AliasableFields, Any[Int, Any])
+        if isa(getfield(x, :f2), Int) # x::PartialStruct(AliasableFields, Any[Int, Int])
+            return getfield(x, :f1), getfield(x, :f2)
+        end
+    end
+    return 0, 0
+end |> only === Tuple{Int,Int}
+@test Base.return_types((Any,)) do a
+    x = AliasableConstField(a, 0)
+    if isa(getfield(x, :f1), Int)
+        return getfield(x, :f1)
+    end
+    return 0
+end |> only === Int
+
+# shouldn't use refinement information when not worthwhile
+@test Base.return_types((AliasableField{Int},)) do a
+    if isa(getfield(a, :f), Any)
+        return getfield(a, :f) # shouldn't be ::Any
+    end
+    return 0
+end |> only === Int
+# shouldn't assume anything about mutable field
+@test Base.return_types((Any,Any)) do a, b
+    x = AliasableConstField{Any,Any}(a, b)
+    if isa(getfield(x, :f2), Int)
+        setfield!(x, :f2, z::Any)
+        return getfield(x, :f2) # shouldn't be ::Int
+    end
+    return 0
+end |> only === Any
+# when abstract type, we shouldn't assume anything
+@test Base.return_types((Any,)) do a
+    if isa(getfield(a, :mayexist), Int)
+        return getfield(a, :mayexist)
+    end
+    return 0
+end |> only === Any
+
+# works inter-procedurally
+@test Base.return_types((AliasableField,)) do a
+    if isa(a.f, Int)
+        return a.f
+    end
+    return 0
+end |> only === Int
+@test Base.return_types((Tuple{Any},)) do t
+    if isa(t[1], Int)
+        return t[1]
+    end
+    return 0
+end |> only === Int
+@test Base.return_types((Any,)) do a
+    x = AliasableFields(a, 0) # x::PartialStruct(AliasableFields, Any[Any, Const(0)])
+    if isa(x.f1, Int)         # x::PartialStruct(AliasableFields, Any[Int, Const(0)])
+        return x.f1
+    end
+    return 0
+end |> only === Int
+@test Base.return_types((Any,Any)) do a, b
+    x = AliasableFields(a, b) # x::AliasableFields
+    if isa(x.f1, Int)         # x::PartialStruct(AliasableFields, Any[Int, Any])
+        if isa(x.f2, Int)     # x::PartialStruct(AliasableFields, Any[Int, Int])
+            return x.f1, x.f2
+        end
+    end
+    return 0, 0
+end |> only === Tuple{Int,Int}
+@test Base.return_types((Any,)) do a
+    x = AliasableConstField(a, 0)
+    if isa(x.f1, Int)
+        return x.f1
+    end
+    return 0
+end |> only === Int
+getf(a) = a.f
+@test Base.return_types((AliasableField,)) do a
+    if isa(getf(a), Int)
+        return getf(a)
+    end
+    return 0
+end |> only === Int
+
+# merge of same `MustAlias`s
+merge_same_aliases(b, a) = b ? _merge_same_aliases1(a) : _merge_same_aliases2(a) # MustAlias(a, Const(:f1), Union{Int,Nothing})
+_merge_same_aliases1(a) = (@assert isa(a.f, Int); a.f) # ::MustAlias(a, Const(:f1), Int)
+_merge_same_aliases2(a) = (@assert isa(a.f, Nothing); a.f) # ::MustAlias(a, Const(:f1), Nothing)
+@test Base.return_types((Bool,AliasableField,)) do b, a
+    return merge_same_aliases(b, a) # ::Union{Int,Nothing}
+end |> only === Union{Nothing,Int}
+
+# call-site refinement
+isaint(a) = isa(a, Int)
+@test Base.return_types((AliasableField,)) do a
+    if isaint(a.f)
+        return a.f
+    end
+    return 0
+end |> only === Int
+# handle multiple call-site refinment targets
+isasome(_) = true
+isasome(::Nothing) = false
+@test Base.return_types((AliasableField{Union{Int,Nothing}},)) do a
+    if isasome(a.f)
+        return a.f
+    end
+    return 0
+end |> only === Int
+
+# appropriate lattice order
+@test Base.return_types((AliasableField{Any},)) do x
+    v = x.f        # ::MustAlias(2, AliasableField{Any}, 1, Any)
+    if isa(v, Int) # ::Conditional(3, Int, Any)
+        v = v      # ::Int (∵ Int ⊑ MustAlias(2, AliasableField{Any}, 1, Any))
+    else
+        v = 42
+    end
+    return v
+end |> only === Int
+
+# complicated callsite refinement cases
+from_interconditional_check11(y::Int, ::AliasableField) = y > 0
+@test Base.return_types((AliasableField{Any},)) do x
+    if from_interconditional_check11(x.f, x)
+        return x.f
+    end
+    return 0
+end |> only === Int
+from_interconditional_check12(::AliasableField, y::Int) = y > 0
+@test Base.return_types((AliasableField{Any},)) do x
+    if from_interconditional_check12(x, x.f)
+        return x.f
+    end
+    return 0
+end |> only === Int
+from_interconditional_check21(y, ::Union{Int,String}) = isa(y, Int)
+@test Base.return_types((AliasableField{Any},)) do x
+    if from_interconditional_check21(x.f, x.f)
+        return x.f
+    end
+    return 0
+end |> only === Int
+from_interconditional_check22(::Union{Int,String}, y) = isa(y, Int)
+@test Base.return_types((AliasableField{Any},)) do x
+    if from_interconditional_check22(x.f, x.f)
+        return x.f
+    end
+    return 0
+end |> only === Int
+
+# === constraint
+# --------------
+
+# simple symmetric tests
+@test Base.return_types((AliasableField,)) do x
+    if x.f === 0
+        return x.f
+    end
+    return 0
+end |> only === Int
+@test Base.return_types((AliasableField,)) do x
+    if 0 === x.f
+        return x.f
+    end
+    return 0
+end |> only === Int
+# NOTE we prioritize constraints on aliased field over those on slots themselves
+@test Base.return_types((AliasableField,Int,)) do x, a
+    if x.f === a
+        return x.f
+    end
+    return 0
+end |> only === Int
+@test Base.return_types((AliasableField,Int,)) do x, a
+    if a === x.f
+        return x.f
+    end
+    return 0
+end |> only === Int
+@test Base.return_types((AliasableField{Union{Nothing,Int}},)) do x
+    if !isnothing(x.f)
+        return x.f
+    end
+    return 0
+end |> only === Int
+@test Base.return_types((AliasableField{Union{Some{Int},Nothing}},)) do x
+    if !isnothing(x.f)
+        return x.f
+    end
+    throw()
+end |> only === Some{Int}
+
+# handle the edge case
+@eval intermustalias_edgecase(_) = $(Core.Compiler.InterMustAlias(2, Some{Any}, 1, Int))
+Base.return_types(intermustalias_edgecase, (Any,)) # create cache
+@test Base.return_types((Any,)) do x
+    intermustalias_edgecase(x)
+end |> only === Core.Compiler.InterMustAlias
+
 function f25579(g)
     h = g[]
     t = (h === nothing)
@@ -4250,6 +4528,17 @@ let # NOTE make sure this toplevel chunk doesn't contain any local binding
     while xcond end
 end
 @test !xcond
+
+# singleton_type on slot wrappers
+@test Base.return_types((Int,)) do x
+    c = isa(x, Int) # ::Conditional
+    c(false)        # ::Union{}
+end |> only === Union{}
+@test Base.return_types((Tuple{typeof(typeof),Float64},)) do args
+    f = args[1] # ::MustAlias
+    v = args[2] # ::MustAlias
+    f(v)        # ::Type{Float64}
+end |> only === Type{Float64}
 
 struct Issue45780
     oc::Core.OpaqueClosure{Tuple{}}

@@ -82,6 +82,70 @@ const AnyConditional = Union{Conditional,InterConditional}
 Conditional(cnd::InterConditional) = Conditinal(cnd.slot, cnd.thentype, cnd.elsetype)
 InterConditional(cnd::Conditional) = InterConditional(cnd.slot, cnd.thentype, cnd.elsetype)
 
+"""
+    alias::MustAlias
+
+This lattice element wraps a reference to object field while recoding the identity of the
+parent object. It allows certain constraints that can be imposed on the object field type
+by built-in functions like `isa` and `===` to be propagated to another reference to the
+same object field.
+One important note is that this lattice element assumes the invariant that the field of
+wrapped slot object never changes until the slot object is re-assigned. This means, the
+wrapped object field should be constant as inference currently doesn't track any memory
+effects on per-object basis. Particularly `maybe_const_fldidx` takes the lift to check if
+a given lattice element is eligible to be wrapped by `MustAlias`. Example:
+```juila
+let alias = getfield(x::Some{Union{Nothing,String}}, :value)::MustAlias(x, Some{Union{Nothing,String}}, 1, Union{Nothing,String})
+    if alias === nothing
+        # May assume `getfield(x, :value)` is `nothing` now
+    else
+        # May assume `getfield(x, :value)` is `::String` now
+    end
+end
+```
+N.B. currently this lattice element is only used in abstractinterpret, not in optimization
+"""
+struct MustAlias
+    slot::Int
+    vartyp::Any
+    fldidx::Int
+    fldtyp::Any
+    function MustAlias(slot::Int, @nospecialize(vartyp), fldidx::Int, @nospecialize(fldtyp))
+        assert_nested_slotwrapper(vartyp)
+        assert_nested_slotwrapper(fldtyp)
+        # @assert !isalreadyconst(vartyp) "vartyp is already const"
+        # @assert !isalreadyconst(fldtyp) "fldtyp is already const"
+        return new(slot, vartyp, fldidx, fldtyp)
+    end
+end
+MustAlias(var::SlotNumber, @nospecialize(vartyp), fldidx::Int, @nospecialize(fldtyp)) =
+    MustAlias(slot_id(var), vartyp, fldidx, fldtyp)
+
+"""
+    alias::InterMustAlias
+
+This lattice element used in a very similar way as `InterConditional`, but corresponds to `MustAlias`.
+"""
+struct InterMustAlias
+    slot::Int
+    vartyp::Any
+    fldidx::Int
+    fldtyp::Any
+    function InterMustAlias(slot::Int, @nospecialize(vartyp), fldidx::Int, @nospecialize(fldtyp))
+        assert_nested_slotwrapper(vartyp)
+        assert_nested_slotwrapper(fldtyp)
+        # @assert !isalreadyconst(vartyp) "vartyp is already const"
+        # @assert !isalreadyconst(fldtyp) "fldtyp is already const"
+        return new(slot, vartyp, fldidx, fldtyp)
+    end
+end
+InterMustAlias(var::SlotNumber, @nospecialize(vartyp), fldidx::Int, @nospecialize(fldtyp)) =
+    InterMustAlias(slot_id(var), vartyp, fldidx, fldtyp)
+
+const AnyMustAlias = Union{MustAlias,InterMustAlias}
+MustAlias(alias::InterMustAlias) = MustAlias(alias.slot, alias.vartyp, alias.fldidx, alias.fldtyp)
+InterMustAlias(alias::MustAlias) = InterMustAlias(alias.slot, alias.vartyp, alias.fldidx, alias.fldtyp)
+
 struct PartialTypeVar
     tv::TypeVar
     # N.B.: Currently unused, but would allow turning something back
@@ -131,7 +195,7 @@ struct NotFound end
 
 const NOT_FOUND = NotFound()
 
-const CompilerTypes = Union{MaybeUndef, Const, Conditional, NotFound, PartialStruct}
+const CompilerTypes = Union{MaybeUndef, Const, Conditional, MustAlias, NotFound, PartialStruct}
 ==(x::CompilerTypes, y::CompilerTypes) = x === y
 ==(x::Type, y::CompilerTypes) = false
 ==(x::CompilerTypes, y::Type) = false
@@ -146,10 +210,13 @@ const CompilerTypes = Union{MaybeUndef, Const, Conditional, NotFound, PartialStr
 function assert_nested_slotwrapper(@nospecialize t)
     @assert !(t isa Conditional)      "found nested Conditional"
     @assert !(t isa InterConditional) "found nested InterConditional"
+    @assert !(t isa MustAlias)        "found nested MustAlias"
+    @assert !(t isa InterMustAlias)   "found nested InterMustAlias"
     return t
 end
 
 widenslotwrapper(@nospecialize typ) = typ
+widenslotwrapper(typ::AnyMustAlias) = widenmustalias(typ)
 widenslotwrapper(typ::AnyConditional) = widenconditional(typ)
 widenwrappedslotwrapper(@nospecialize typ) = widenslotwrapper(typ)
 widenwrappedslotwrapper(typ::LimitedAccuracy) = LimitedAccuracy(widenslotwrapper(typ.typ), typ.causes)
@@ -198,6 +265,76 @@ function maybe_extract_const_bool(c::AnyConditional)
 end
 maybe_extract_const_bool(@nospecialize c) = nothing
 
+# MustAlias
+# =========
+
+widenmustalias(@nospecialize typ) = typ
+widenmustalias(typ::AnyMustAlias) = typ.fldtyp
+widenmustalias(::LimitedAccuracy) = error("unhandled LimitedAccuracy")
+
+function isalreadyconst(@nospecialize t)
+    isa(t, Const) && return true
+    isa(t, DataType) && isdefined(t, :instance) && return true
+    return isconstType(t)
+end
+
+function maybe_const_fldidx(@nospecialize(objtyp), @nospecialize(fldval))
+    t = widenconst(objtyp)
+    if isa(fldval, Int)
+        fldidx = fldval
+    elseif isa(fldval, Symbol)
+        isa(t, DataType) || isa(t, UnionAll) || return nothing
+        fldidx = fieldindex(t, fldval, false)
+    else
+        return nothing
+    end
+    fldidx == 0 && return nothing
+    isconst(t, fldidx) || return nothing
+    fldcnt = fieldcount_noerror(t)
+    (fldcnt === nothing || fldcnt == 0) && return nothing
+    return fldidx
+end
+
+function form_mustalias_conditional(alias::MustAlias, @nospecialize(thentype), @nospecialize(elsetype))
+    (; slot, vartyp, fldidx) = alias
+    if isa(vartyp, PartialStruct)
+        fields = vartyp.fields
+        thenfields = thentype === Bottom ? nothing : copy(fields)
+        elsefields = elsetype === Bottom ? nothing : copy(fields)
+        for i in 1:length(fields)
+            if i == fldidx
+                thenfields === nothing || (thenfields[i] = thentype)
+                elsefields === nothing || (elsefields[i] = elsetype)
+            end
+        end
+        return Conditional(slot,
+            thenfields === nothing ? Bottom : PartialStruct(vartyp.typ, thenfields),
+            elsefields === nothing ? Bottom : PartialStruct(vartyp.typ, elsefields))
+    else
+        vartyp_widened = widenconst(vartyp)
+        thenfields = thentype === Bottom ? nothing : Any[]
+        elsefields = elsetype === Bottom ? nothing : Any[]
+        for i in 1:fieldcount(vartyp_widened)
+            if i == fldidx
+                thenfields === nothing || push!(thenfields, thentype)
+                elsefields === nothing || push!(elsefields, elsetype)
+            else
+                t = fieldtype(vartyp_widened, i)
+                thenfields === nothing || push!(thenfields, t)
+                elsefields === nothing || push!(elsefields, t)
+            end
+        end
+        return Conditional(slot,
+            thenfields === nothing ? Bottom : PartialStruct(vartyp_widened, thenfields),
+            elsefields === nothing ? Bottom : PartialStruct(vartyp_widened, elsefields))
+    end
+end
+
+function issubalias(a::AnyMustAlias, b::AnyMustAlias)
+    return a.slot == b.slot && a.fldidx == b.fldidx &&
+        a.vartyp ⊑ b.vartyp && a.fldtyp ⊑ b.fldtyp
+end
+
 # LimitedAccuracy
 # ===============
 
@@ -243,6 +380,14 @@ The non-strict partial order over the type inference lattice.
         a = Bool
     elseif isa(b, AnyConditional)
         return false
+    end
+    if isa(a, AnyMustAlias)
+        if isa(b, AnyMustAlias)
+            return issubalias(a, b)
+        end
+        a = widenmustalias(a)
+    elseif isa(b, AnyMustAlias)
+        return a ⊏ widenmustalias(b)
     end
     if isa(a, PartialStruct)
         if isa(b, PartialStruct)
@@ -426,6 +571,7 @@ end
 Widens extended lattice element `x` to native `Type` representation.
 """
 widenconst(::AnyConditional) = Bool
+widenconst(a::AnyMustAlias) = widenconst(widenmustalias(a))
 widenconst(c::Const) = (v = c.val; isa(v, Type) ? Type{v} : typeof(v))
 widenconst(m::MaybeUndef) = widenconst(m.typ)
 widenconst(::PartialTypeVar) = TypeVar
@@ -457,7 +603,8 @@ end
 # remove any lattice elements that wrap the reassigned slot object from the vartable
 function invalidate_slotwrapper(vt::VarState, changeid::Int, ignore_conditional::Bool)
     newtyp = ignorelimited(vt.typ)
-    if (!ignore_conditional && isa(newtyp, Conditional) && newtyp.slot == changeid)
+    if (!ignore_conditional && isa(newtyp, Conditional) && newtyp.slot == changeid) ||
+       (isa(newtyp, MustAlias) && newtyp.slot == changeid)
         newtyp = widenwrappedslotwrapper(vt.typ)
         return VarState(newtyp, vt.undef)
     end

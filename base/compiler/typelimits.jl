@@ -343,6 +343,16 @@ function issimplertype(@nospecialize(typea), @nospecialize(typeb))
         is_same_conditionals(typea, typeb) || return false
         issimplertype(typea.thentype, typeb.thentype) || return false
         issimplertype(typea.elsetype, typeb.elsetype) || return false
+    elseif typea isa MustAlias
+        typeb isa MustAlias || return false
+        issubalias(typeb, typea) || return false
+        issimplertype(typea.vartyp, typeb.vartyp) || return false
+        issimplertype(typea.fldtyp, typeb.fldtyp) || return false
+    elseif typea isa InterMustAlias
+        typeb isa InterMustAlias || return false
+        issubalias(typeb, typea) || return false
+        issimplertype(typea.vartyp, typeb.vartyp) || return false
+        issimplertype(typea.fldtyp, typeb.fldtyp) || return false
     elseif typea isa PartialOpaque
         # TODO
     end
@@ -389,6 +399,9 @@ function tmerge(@nospecialize(typea), @nospecialize(typeb))
             isa(typea, MaybeUndef) ? typea.typ : typea,
             isa(typeb, MaybeUndef) ? typeb.typ : typeb))
     end
+
+    typea = widenmustalias(typea)
+    typeb = widenmustalias(typeb)
 
     # type-lattice for Conditional wrapper (NOTE never be merged with InterConditional)
     if isa(typea, Conditional) && isa(typeb, Const)

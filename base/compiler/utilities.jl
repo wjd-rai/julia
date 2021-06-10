@@ -214,6 +214,7 @@ end
 #########
 
 function singleton_type(@nospecialize(ft))
+    ft = widenslotwrapper(ft)
     if isa(ft, Const)
         return ft.val
     elseif isconstType(ft)
