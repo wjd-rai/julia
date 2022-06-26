@@ -1452,9 +1452,10 @@ static void invalidate_method_instance(void (*f)(jl_code_instance_t*), jl_method
     jl_array_t *backedges = replaced->backedges;
     if (backedges) {
         replaced->backedges = NULL;
-        size_t i, l = jl_array_len(backedges);
-        for (i = 0; i < l; i++) {
-            jl_method_instance_t *replaced = (jl_method_instance_t*)jl_array_ptr_ref(backedges, i);
+        size_t i = 0, l = jl_array_len(backedges);
+        jl_method_instance_t *replaced;
+        while (i < l) {
+            i = get_next_backedge(backedges, i, NULL, &replaced);
             invalidate_method_instance(f, replaced, max_world, depth + 1);
         }
     }
@@ -1469,10 +1470,11 @@ void invalidate_backedges(void (*f)(jl_code_instance_t*), jl_method_instance_t *
     if (backedges) {
         // invalidate callers (if any)
         replaced_mi->backedges = NULL;
-        size_t i, l = jl_array_len(backedges);
-        jl_method_instance_t **replaced = (jl_method_instance_t**)jl_array_ptr_data(backedges);
-        for (i = 0; i < l; i++) {
-            invalidate_method_instance(f, replaced[i], max_world, 1);
+        size_t i = 0, l = jl_array_len(backedges);
+        jl_method_instance_t *replaced;
+        while (i < l) {
+            i = get_next_backedge(backedges, i, NULL, &replaced);
+            invalidate_method_instance(f, replaced, max_world, 1);
         }
     }
     JL_UNLOCK(&replaced_mi->def.method->writelock);
@@ -1496,13 +1498,19 @@ JL_DLLEXPORT void jl_method_instance_add_backedge(jl_method_instance_t *callee, 
         jl_array_ptr_set(callee->backedges, 0, caller);
     }
     else {
-        size_t i, l = jl_array_len(callee->backedges);
-        for (i = 0; i < l; i++) {
-            if (jl_array_ptr_ref(callee->backedges, i) == (jl_value_t*)caller)
+        size_t i = 0, l = jl_array_len(callee->backedges);
+        int found = 0;
+        jl_value_t *invokeTypes;
+        jl_method_instance_t *mi;
+        while (i < l) {
+            i = get_next_backedge(callee->backedges, i, &invokeTypes, &mi);
+            if (mi == caller)  { // FIXME: pass in and check invokeTypes too
+                found = 1;
                 break;
+            }
         }
-        if (i == l) {
-            jl_array_ptr_1d_push(callee->backedges, (jl_value_t*)caller);
+        if (!found) {
+            push_backedge(callee->backedges, NULL, caller); // FIXME
         }
     }
     JL_UNLOCK(&callee->def.method->writelock);

@@ -336,9 +336,10 @@ static int has_backedge_to_worklist(jl_method_instance_t *mi, htable_t *visited)
     if (!mi->backedges) {
         return 0;
     }
-    size_t i, n = jl_array_len(mi->backedges);
-    for (i = 0; i < n; i++) {
-        jl_method_instance_t *be = (jl_method_instance_t*)jl_array_ptr_ref(mi->backedges, i);
+    size_t i = 0, n = jl_array_len(mi->backedges);
+    jl_method_instance_t *be;
+    while (i < n) {
+        i = get_next_backedge(mi->backedges, i, NULL, &be);
         if (has_backedge_to_worklist(be, visited)) {
             bp = ptrhash_bp(visited, mi);           // re-acquire since rehashing might change the location
             *bp = (void*)((char*)HT_NOTFOUND + 2);  // found
@@ -946,12 +947,16 @@ static void jl_serialize_value_(jl_serializer_state *s, jl_value_t *v, int as_li
         if (backedges) {
             // filter backedges to only contain pointers
             // to items that we will actually store (internal >= 2)
-            size_t ins, i, l = jl_array_len(backedges);
-            jl_method_instance_t **b_edges = (jl_method_instance_t**)jl_array_data(backedges);
-            for (ins = i = 0; i < l; i++) {
-                jl_method_instance_t *backedge = b_edges[i];
+            size_t ins = 0, i = 0, l = jl_array_len(backedges);
+            jl_value_t **b_edges = (jl_value_t**)jl_array_data(backedges);
+            jl_value_t *invokeTypes;
+            jl_method_instance_t *backedge;
+            while (i < l) {
+                i = get_next_backedge(backedges, i, &invokeTypes, &backedge);
                 if (module_in_worklist(backedge->def.method->module) || method_instance_in_queue(backedge)) {
-                    b_edges[ins++] = backedge;
+                    if (invokeTypes)
+                        b_edges[ins++] = invokeTypes;
+                    b_edges[ins++] = (jl_value_t*)backedge;
                 }
             }
             if (ins != l)
@@ -1177,12 +1182,16 @@ static void collect_backedges(jl_method_instance_t *callee) JL_GC_DISABLED
 {
     jl_array_t *backedges = callee->backedges;
     if (backedges) {
-        size_t i, l = jl_array_len(backedges);
-        for (i = 0; i < l; i++) {
-            jl_method_instance_t *caller = (jl_method_instance_t*)jl_array_ptr_ref(backedges, i);
+        size_t i = 0, l = jl_array_len(backedges);
+        jl_value_t *invokeTypes;
+        jl_method_instance_t *caller;
+        while (i < l) {
+            i = get_next_backedge(backedges, i, &invokeTypes, &caller);
             jl_array_t **edges = (jl_array_t**)ptrhash_bp(&edges_map, caller);
             if (*edges == HT_NOTFOUND)
                 *edges = jl_alloc_vec_any(0);
+            if (invokeTypes)
+                jl_array_ptr_1d_push(*edges, invokeTypes);
             jl_array_ptr_1d_push(*edges, (jl_value_t*)callee);
         }
     }
@@ -2330,36 +2339,42 @@ static void jl_insert_method_instances(jl_array_t *list)
         if (milive != mi) {
             // A previously-loaded module compiled this method, so the one we deserialized will be dropped.
             // But make sure the backedges are copied over.
+            jl_value_t *invokeTypes;
+            jl_method_instance_t *be, *belive;
             if (mi->backedges) {
                 if (!milive->backedges) {
                     // Copy all the backedges (after looking up the live ones)
-                    size_t j, n = jl_array_len(mi->backedges);
+                    size_t j = 0, jlive = 0, n = jl_array_len(mi->backedges);
                     milive->backedges = jl_alloc_vec_any(n);
                     jl_gc_wb(milive, milive->backedges);
-                    for (j = 0; j < n; j++) {
-                        jl_method_instance_t *be = (jl_method_instance_t*)jl_array_ptr_ref(mi->backedges, j);
-                        jl_method_instance_t *belive = (jl_method_instance_t*)ptrhash_get(&uniquing_table, be);
+                    while (j < n) {
+                        j = get_next_backedge(mi->backedges, j, &invokeTypes, &be);
+                        belive = (jl_method_instance_t*)ptrhash_get(&uniquing_table, be);
                         if (belive == HT_NOTFOUND)
                             belive = be;
-                        jl_array_ptr_set(milive->backedges, j, belive);
+                        jlive = set_next_backedge(milive->backedges, jlive, invokeTypes, belive);
                     }
                 } else {
                     // Copy the missing backedges (this is an O(N^2) algorithm, but many methods have few MethodInstances)
-                    size_t j, k, n = jl_array_len(mi->backedges), nlive = jl_array_len(milive->backedges);
-                    for (j = 0; j < n; j++) {
-                        jl_method_instance_t *be = (jl_method_instance_t*)jl_array_ptr_ref(mi->backedges, j);
-                        jl_method_instance_t *belive = (jl_method_instance_t*)ptrhash_get(&uniquing_table, be);
+                    size_t j = 0, k, n = jl_array_len(mi->backedges), nlive = jl_array_len(milive->backedges);
+                    jl_value_t *invokeTypes2;
+                    jl_method_instance_t *belive2;
+                    while (j < n) {
+                        j = get_next_backedge(mi->backedges, j, &invokeTypes, &be);
+                        belive = (jl_method_instance_t*)ptrhash_get(&uniquing_table, be);
                         if (belive == HT_NOTFOUND)
                             belive = be;
                         int found = 0;
-                        for (k = 0; k < nlive; k++) {
-                            if (belive == (jl_method_instance_t*)jl_array_ptr_ref(milive->backedges, k)) {
+                        k = 0;
+                        while (k < nlive) {
+                            k = get_next_backedge(milive->backedges, k, &invokeTypes2, &belive2);
+                            if (belive == belive2 && invokeTypes == invokeTypes2) {
                                 found = 1;
                                 break;
                             }
                         }
                         if (!found)
-                            jl_array_ptr_1d_push(milive->backedges, (jl_value_t*)belive);
+                            push_backedge(milive->backedges, invokeTypes, belive);
                     }
                 }
             }
