@@ -1488,14 +1488,16 @@ void invalidate_backedges(void (*f)(jl_code_instance_t*), jl_method_instance_t *
 }
 
 // add a backedge from callee to caller
-JL_DLLEXPORT void jl_method_instance_add_backedge(jl_method_instance_t *callee, jl_method_instance_t *caller)
+JL_DLLEXPORT void jl_method_instance_add_backedge(jl_method_instance_t *callee, jl_value_t *invokesig, jl_method_instance_t *caller)
 {
     JL_LOCK(&callee->def.method->writelock);
+    if (invokesig == jl_nothing)
+        invokesig = NULL;      // julia uses `nothing` but C uses NULL (#undef)
     if (!callee->backedges) {
         // lazy-init the backedges array
-        callee->backedges = jl_alloc_vec_any(1);
+        callee->backedges = jl_alloc_vec_any(0);
         jl_gc_wb(callee, callee->backedges);
-        jl_array_ptr_set(callee->backedges, 0, caller);
+        push_backedge(callee->backedges, invokesig, caller);
     }
     else {
         size_t i = 0, l = jl_array_len(callee->backedges);
@@ -1504,13 +1506,13 @@ JL_DLLEXPORT void jl_method_instance_add_backedge(jl_method_instance_t *callee, 
         jl_method_instance_t *mi;
         while (i < l) {
             i = get_next_backedge(callee->backedges, i, &invokeTypes, &mi);
-            if (mi == caller)  { // FIXME: pass in and check invokeTypes too
+            if (mi == caller && invokesig == invokeTypes)  {
                 found = 1;
                 break;
             }
         }
         if (!found) {
-            push_backedge(callee->backedges, NULL, caller); // FIXME
+            push_backedge(callee->backedges, invokesig, caller);
         }
     }
     JL_UNLOCK(&callee->def.method->writelock);

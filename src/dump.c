@@ -2485,7 +2485,7 @@ static void jl_insert_backedges(jl_array_t *list, jl_array_t *targets)
                 int32_t idx = idxs[j];
                 jl_value_t *callee = jl_array_ptr_ref(targets, idx * 2);
                 if (jl_is_method_instance(callee)) {
-                    jl_method_instance_add_backedge((jl_method_instance_t*)callee, caller);
+                    jl_method_instance_add_backedge((jl_method_instance_t*)callee, NULL, caller);
                 }
                 else {
                     jl_methtable_t *mt = jl_method_table_for(callee);
