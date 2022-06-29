@@ -166,6 +166,7 @@ end
 end
 
 # Profile deadlocking in compilation (debuginfo registration)
+term_signal = parse(Int, get(ENV, "JULIA_TEST_TIMEOUT_SIGNUM", "$(Base.SIGTERM)"))
 let cmd = Base.julia_cmd()
     script = """
         using Profile
@@ -181,7 +182,7 @@ let cmd = Base.julia_cmd()
     t = Timer(120) do t
         # should be under 10 seconds, so give it 2 minutes then report failure
         println("KILLING BY PROFILE TEST WATCHDOG\n")
-        kill(p, Base.SIGTERM)
+        kill(p, term_signal)
         sleep(10)
         kill(p, Base.SIGKILL)
     end
@@ -209,7 +210,7 @@ if Sys.isbsd() || Sys.islinux()
             t = Timer(120) do t
                 # should be under 10 seconds, so give it 2 minutes then report failure
                 println("KILLING BY PROFILE TEST WATCHDOG\n")
-                kill(p, Base.SIGTERM)
+                kill(p, term_signal)
                 sleep(10)
                 kill(p, Base.SIGKILL)
                 close(iob)

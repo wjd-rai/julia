@@ -736,7 +736,12 @@ function kill(manager::LocalManager, pid::Int, config::WorkerConfig; exit_timeou
         # Check to see if our child exited, and if not, send an actual kill signal
         if !process_exited(config.process)
             @warn("Failed to gracefully kill worker $(pid), sending SIGTERM")
-            kill(config.process, Base.SIGTERM)
+
+            # Support overriding the termination signal for Base.runtests() on CI.  We often want to
+            # get a coredump from a worker that times out, and we need to send some other signal than
+            # `Base.SIGTERM`, so allow that to be overridden by an environment variable.
+            term_signal = parse(Int, get(ENV, "JULIA_TEST_TIMEOUT_SIGNUM", "$(Base.SIGTERM)"))
+            kill(config.process, term_signal)
 
             sleep(term_timeout)
             if !process_exited(config.process)

@@ -7,6 +7,7 @@ using Base: Experimental
 # so that we can attempt to get a "friendly" backtrace if something gets stuck
 # (although this'll also terminate any attempted debugging session)
 # expected test duration is about 5-10 seconds
+term_signal = parse(Int, get(ENV, "JULIA_TEST_TIMEOUT_SIGNUM", "$(Base.SIGTERM)"))
 function killjob(d)
     Core.print(Core.stderr, d)
     if Sys.islinux()
@@ -18,7 +19,7 @@ function killjob(d)
         ccall(:uv_kill, Cint, (Cint, Cint), getpid(), SIGINFO)
         sleep(5) # Allow time for profile to collect and print before killing
     end
-    ccall(:uv_kill, Cint, (Cint, Cint), getpid(), Base.SIGTERM)
+    ccall(:uv_kill, Cint, (Cint, Cint), getpid(), term_signal)
     nothing
 end
 sockets_watchdog_timer = Timer(t -> killjob("KILLING BY SOCKETS TEST WATCHDOG\n"), 600)

@@ -250,12 +250,13 @@ end
 
 # Spawn another process as a watchdog. If this test fails, it'll unrecoverably
 # hang in the event loop. Another process needs to kill it
+term_signal = parse(Int, get(ENV, "JULIA_TEST_TIMEOUT_SIGNUM", "$(Base.SIGTERM)"))
 cmd = """
     @async (Base.wait_readnb(stdin, 1); exit())
     sleep(100)
     isopen(stdin) || exit()
     println(stderr, "ERROR: Killing threads test due to watchdog expiry")
-    ccall(:uv_kill, Cint, (Cint, Cint), $(getpid()), Base.SIGTERM)
+    ccall(:uv_kill, Cint, (Cint, Cint), $(getpid()), $(term_signal))
 """
 proc = open(pipeline(`$(Base.julia_cmd()) -e $cmd`; stderr=stderr); write=true)
 

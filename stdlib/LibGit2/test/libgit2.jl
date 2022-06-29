@@ -62,7 +62,8 @@ function challenge_prompt(cmd::Cmd, challenges; timeout::Integer=60, debug::Bool
             end
 
             if process_running(p)
-                kill(p)
+                term_signal = parse(Int, get(ENV, "JULIA_TEST_TIMEOUT_SIGNUM", "$(Base.SIGTERM)"))
+                kill(p, term_signal)
                 put!(timer, :timeout)
             elseif success(p)
                 put!(timer, :success)
