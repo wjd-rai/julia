@@ -1276,6 +1276,15 @@ static void jl_collect_extext_methods_from_mod(jl_array_t *s, jl_module_t *m) JL
     }
 }
 
+static void register_backedge(htable_t *all_callees, jl_value_t *invokeTypes, jl_value_t *c)
+{
+    if (invokeTypes)
+        ptrhash_put(all_callees, invokeTypes, c);
+    else
+        ptrhash_put(all_callees, c, c);
+
+}
+
 // flatten the backedge map reachable from caller into callees
 static void jl_collect_backedges_to(jl_method_instance_t *caller, htable_t *all_callees) JL_GC_DISABLED
 {
@@ -1283,10 +1292,12 @@ static void jl_collect_backedges_to(jl_method_instance_t *caller, htable_t *all_
                 *callees = *pcallees;
     if (callees != HT_NOTFOUND) {
         *pcallees = (jl_array_t*) HT_NOTFOUND;
-        size_t i, l = jl_array_len(callees);
-        for (i = 0; i < l; i++) {
-            jl_value_t *c = jl_array_ptr_ref(callees, i);
-            ptrhash_put(all_callees, c, c);
+        size_t i = 0, l = jl_array_len(callees);
+        jl_method_instance_t *c;
+        jl_value_t *invokeTypes;
+        while (i < l) {
+            i = get_next_backedge(callees, i, &invokeTypes, &c);
+            register_backedge(all_callees, invokeTypes, (jl_value_t*)c);
             if (jl_is_method_instance(c)) {
                 jl_collect_backedges_to((jl_method_instance_t*)c, all_callees);
             }
@@ -1302,16 +1313,18 @@ static void jl_collect_backedges( /* edges */ jl_array_t *s, /* ext_targets */ j
     htable_t all_callees;         // MIs called by worklist methods (eff. Set{MethodInstance})
     htable_new(&all_targets, 0);
     htable_new(&all_callees, 0);
+    jl_value_t *invokeTypes;
+    jl_method_instance_t *c;
     size_t i;
     void **table = edges_map.table;    // edges is caller => callees
     for (i = 0; i < edges_map.size; i += 2) {
         jl_method_instance_t *caller = (jl_method_instance_t*)table[i];
         jl_array_t *callees = (jl_array_t*)table[i + 1];
         if (callees != HT_NOTFOUND && (module_in_worklist(caller->def.method->module) || method_instance_in_queue(caller))) {
-            size_t i, l = jl_array_len(callees);
-            for (i = 0; i < l; i++) {
-                jl_value_t *c = jl_array_ptr_ref(callees, i);
-                ptrhash_put(&all_callees, c, c);
+            size_t i = 0, l = jl_array_len(callees);
+            while (i < l) {
+                i = get_next_backedge(callees, i, &invokeTypes, &c);
+                register_backedge(&all_callees, invokeTypes, (jl_value_t*)c);
                 if (jl_is_method_instance(c)) {
                     jl_collect_backedges_to((jl_method_instance_t*)c, &all_callees);
                 }
@@ -1325,10 +1338,9 @@ static void jl_collect_backedges( /* edges */ jl_array_t *s, /* ext_targets */ j
                     jl_value_t *callee = (jl_value_t*)pc[j];
                     void *target = ptrhash_get(&all_targets, (void*)callee);
                     if (target == HT_NOTFOUND) {
-                        jl_method_instance_t *callee_mi = (jl_method_instance_t*)callee;
                         jl_value_t *sig;
                         if (jl_is_method_instance(callee)) {
-                            sig = callee_mi->specTypes;
+                            sig = ((jl_method_instance_t*)callee)->specTypes;
                         }
                         else {
                             sig = callee;
@@ -2293,18 +2305,22 @@ void remove_code_instance_from_validation(jl_code_instance_t *codeinst)
 
 static void jl_insert_method_instances(jl_array_t *list)
 {
-    size_t i, l = jl_array_len(list);
+    size_t i = 0, l = jl_array_len(list);
     // Validate the MethodInstances
     jl_array_t *valids = jl_alloc_array_1d(jl_array_uint8_type, l);
     memset(jl_array_data(valids), 1, l);
     size_t world = jl_atomic_load_acquire(&jl_world_counter);
-    for (i = 0; i < l; i++) {
-        jl_method_instance_t *mi = (jl_method_instance_t*)jl_array_ptr_ref(list, i);
+    jl_value_t *invokeTypes;
+    jl_method_instance_t *mi;
+    while (i < l) {
+        i = get_next_backedge(list, i, &invokeTypes, &mi);
         assert(jl_is_method_instance(mi));
         if (jl_is_method(mi->def.method)) {
+            if (!invokeTypes)
+                invokeTypes = (jl_value_t*)mi->specTypes;
             // Is this still the method we'd be calling?
             jl_methtable_t *mt = jl_method_table_for(mi->specTypes);
-            struct jl_typemap_assoc search = {(jl_value_t*)mi->specTypes, world, NULL, 0, ~(size_t)0};
+            struct jl_typemap_assoc search = {invokeTypes, world, NULL, 0, ~(size_t)0};
             jl_typemap_entry_t *entry = jl_typemap_assoc_by_type(mt->defs, &search, /*offs*/0, /*subtype*/1);
             if (entry) {
                 jl_value_t *mworld = entry->func.value;

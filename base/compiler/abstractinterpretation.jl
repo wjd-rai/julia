@@ -1596,7 +1596,7 @@ function abstract_invoke(interp::AbstractInterpreter, (; fargs, argtypes)::ArgIn
     ti = tienv[1]; env = tienv[2]::SimpleVector
     result = abstract_call_method(interp, method, ti, env, false, sv)
     (; rt, edge, effects) = result
-    edge !== nothing && add_backedge!(edge::MethodInstance, sv)
+    edge !== nothing && add_backedge!(edge::MethodInstance, sv, argtypes)
     match = MethodMatch(ti, env, method, argtype <: method.sig)
     res = nothing
     sig = match.spec_types
