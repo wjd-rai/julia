@@ -510,8 +510,8 @@ end
 function project_deps_get(env::String, name::String)::Union{Nothing,PkgId}
     project_file = env_project_file(env)
     if project_file isa String
-        pkg_uuid = explicit_project_deps_get(project_file, name)
-        pkg_uuid === nothing || return PkgId(pkg_uuid, name)
+        pkg_uuid, weak = explicit_project_deps_get(project_file, name)
+        pkg_uuid === nothing || return PkgId(pkg_uuid, name, weak)
     elseif project_file
         return implicit_project_deps_get(env, name)
     end
@@ -527,8 +527,8 @@ function manifest_deps_get(env::String, where::PkgId, name::String)::Union{Nothi
         proj = project_file_name_uuid(project_file, where.name)
         if proj == where
             # if `where` matches the project, use [deps] section as manifest, and stop searching
-            pkg_uuid = explicit_project_deps_get(project_file, name)
-            return PkgId(pkg_uuid, name)
+            pkg_uuid, weak = explicit_project_deps_get(project_file, name)
+            return PkgId(pkg_uuid, name, weak)
         end
         # look for manifest file and `where` stanza
         return explicit_manifest_deps_get(project_file, uuid, name)
@@ -641,21 +641,26 @@ end
 
 ## explicit project & manifest API ##
 
-# find project file root or deps `name => uuid` mapping
+# find project file root or deps `name => uuid` mapping and if it is a weak dep
 # return `nothing` if `name` is not found
 function explicit_project_deps_get(project_file::String, name::String)::Union{Nothing,UUID}
     d = parsed_toml(project_file)
     root_uuid = dummy_uuid(project_file)
     if get(d, "name", nothing)::Union{String, Nothing} === name
         uuid = get(d, "uuid", nothing)::Union{String, Nothing}
-        return uuid === nothing ? root_uuid : UUID(uuid)
+        return uuid === nothing ? (root_uuid, false) : (UUID(uuid), false)
     end
     deps = get(d, "deps", nothing)::Union{Dict{String, Any}, Nothing}
     if deps !== nothing
         uuid = get(deps, name, nothing)::Union{String, Nothing}
-        uuid === nothing || return UUID(uuid)
+        uuid === nothing || return UUID(uuid), false
     end
-    return nothing
+    weak_deps = get(d, "weakdeps", nothing)::Union{Dict{String, Any}, Nothing}
+    if weak_deps !== nothing
+        uuid = get(weak_deps, name, nothing)::Union{String, Nothing}
+        uuid === nothing || return UUID(uuid), true
+    end
+    return nothing, false
 end
 
 function is_v1_format_manifest(raw_manifest::Dict)
@@ -689,6 +694,7 @@ function explicit_manifest_deps_get(project_file::String, where::UUID, name::Str
     d = get_deps(parsed_toml(manifest_file))
     found_where = false
     found_name = false
+    weak = false
     for (dep_name, entries) in d
         entries::Vector{Any}
         for entry in entries
@@ -697,19 +703,22 @@ function explicit_manifest_deps_get(project_file::String, where::UUID, name::Str
             uuid === nothing && continue
             if UUID(uuid) === where
                 found_where = true
-                # deps is either a list of names (deps = ["DepA", "DepB"]) or
+                # deps and weakdeps are either a list of names (deps = ["DepA", "DepB"]) or
                 # a table of entries (deps = {"DepA" = "6ea...", "DepB" = "55d..."}
-                deps = get(entry, "deps", nothing)::Union{Vector{String}, Dict{String, Any}, Nothing}
-                deps === nothing && continue
-                if deps isa Vector{String}
-                    found_name = name in deps
-                    break
-                else
-                    deps = deps::Dict{String, Any}
-                    for (dep, uuid) in deps
-                        uuid::String
-                        if dep === name
-                            return PkgId(UUID(uuid), name)
+                for (depname, isweak) in [("deps", false), ("weakdeps", true)]
+                    deps = get(entry, depname, nothing)::Union{Vector{String}, Dict{String, Any}, Nothing}
+                    deps === nothing && continue
+                    if deps isa Vector{String}
+                        found_name = name in deps
+                        weak = isweak
+                        break
+                    else
+                        deps = deps::Dict{String, Any}
+                        for (dep, uuid) in deps
+                            uuid::String
+                            if dep === name
+                                return PkgId(UUID(uuid), name, isweak)
+                            end
                         end
                     end
                 end
@@ -718,7 +727,7 @@ function explicit_manifest_deps_get(project_file::String, where::UUID, name::Str
     end
     found_where || return nothing
     found_name || return PkgId(name)
-    # Only reach here if deps was not a dict which mean we have a unique name for the dep
+    # Only reach here if deps was not a dict which means we have a unique name for the dep
     name_deps = get(d, name, nothing)::Union{Nothing, Vector{Any}}
     if name_deps === nothing || length(name_deps) != 1
         error("expected a single entry for $(repr(name)) in $(repr(project_file))")
@@ -726,7 +735,7 @@ function explicit_manifest_deps_get(project_file::String, where::UUID, name::Str
     entry = first(name_deps::Vector{Any})::Dict{String, Any}
     uuid = get(entry, "uuid", nothing)::Union{String, Nothing}
     uuid === nothing && return nothing
-    return PkgId(UUID(uuid), name)
+    return PkgId(UUID(uuid), name, isweak)
 end
 
 # find `uuid` stanza, return the corresponding path
@@ -793,8 +802,8 @@ function implicit_manifest_deps_get(dir::String, where::PkgId, name::String)::Un
     proj = project_file_name_uuid(project_file, where.name)
     proj == where || return nothing # verify that this is the correct project file
     # this is the correct project, so stop searching here
-    pkg_uuid = explicit_project_deps_get(project_file, name)
-    return PkgId(pkg_uuid, name)
+    pkg_uuid, weak = explicit_project_deps_get(project_file, name)
+    return PkgId(pkg_uuid, name, weak)
 end
 
 # look for an entry-point for `pkg` and return its path if UUID matches
@@ -1242,6 +1251,7 @@ function require(into::Module, mod::Symbol)
         LOADING_CACHE[] = nothing
     end
     end
+    return true
 end
 
 mutable struct PkgOrigin
