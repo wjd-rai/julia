@@ -1489,6 +1489,7 @@ static int64_t write_dependency_list(ios_t *s, jl_array_t **udepsp)
         jl_value_t *prefs_list = NULL;
 
         JL_GC_PUSH2(&weak_list, &prefs_list);
+        /*
         if (jl_base_module) {
             // Toplevel module is the module we're currently compiling, use it to get our weak dependencies
             jl_value_t * toplevel = (jl_value_t*)jl_get_global(jl_base_module, jl_symbol("__toplevel__"));
@@ -1511,6 +1512,7 @@ static int64_t write_dependency_list(ios_t *s, jl_array_t **udepsp)
         }
         if (weak_list == NULL)
             write_int32(s, 0);
+        */
 
         // Calculate Preferences hash for current package.
         if (jl_base_module) {
