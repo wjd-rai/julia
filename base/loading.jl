@@ -643,7 +643,7 @@ end
 
 # find project file root or deps `name => uuid` mapping and if it is a weak dep
 # return `nothing` if `name` is not found
-function explicit_project_deps_get(project_file::String, name::String)::Union{Nothing,UUID}
+function explicit_project_deps_get(project_file::String, name::String)::Tuple{Union{Nothing,UUID}, Bool}
     d = parsed_toml(project_file)
     root_uuid = dummy_uuid(project_file)
     if get(d, "name", nothing)::Union{String, Nothing} === name
@@ -711,7 +711,7 @@ function explicit_manifest_deps_get(project_file::String, where::UUID, name::Str
                     if deps isa Vector{String}
                         found_name = name in deps
                         weak = isweak
-                        break
+                        found_name && break
                     else
                         deps = deps::Dict{String, Any}
                         for (dep, uuid) in deps
@@ -722,11 +722,12 @@ function explicit_manifest_deps_get(project_file::String, where::UUID, name::Str
                         end
                     end
                 end
+                break
             end
         end
     end
     found_where || return nothing
-    found_name || return PkgId(name)
+    found_name || return PkgId(name, weak)
     # Only reach here if deps was not a dict which means we have a unique name for the dep
     name_deps = get(d, name, nothing)::Union{Nothing, Vector{Any}}
     if name_deps === nothing || length(name_deps) != 1
@@ -735,7 +736,7 @@ function explicit_manifest_deps_get(project_file::String, where::UUID, name::Str
     entry = first(name_deps::Vector{Any})::Dict{String, Any}
     uuid = get(entry, "uuid", nothing)::Union{String, Nothing}
     uuid === nothing && return nothing
-    return PkgId(UUID(uuid), name, isweak)
+    return PkgId(UUID(uuid), name, weak)
 end
 
 # find `uuid` stanza, return the corresponding path
@@ -858,6 +859,83 @@ end
 
 # use an Int counter so that nested @time_imports calls all remain open
 const TIMING_IMPORTS = Threads.Atomic{Int}(0)
+
+collect_weak_deps(where::Module) = collect_weak_deps(PkgId(where))
+function collect_weak_deps(where::PkgId)
+    # Check if this is the project
+    envs = Base.load_path()
+    isempty(envs) && return nothing
+    env = first(envs)
+    project_file = env_project_file(env)
+    project_file isa String || return Dict{String, UUID}()
+    proj = project_file_name_uuid(project_file, where.name)
+    if proj == where
+        d = parsed_toml(project_file)
+        weak_deps = get(d, "weakdeps", nothing)::Union{Dict{String, Any}, Nothing}
+        return Dict{String, UUID}(k => UUID(v::String) for (k,v) in weak_deps)
+    else
+        manifest_file = project_file_manifest_path(project_file)
+        manifest_file === nothing && return Dict{String, UUID}()
+        d = get_deps(parsed_toml(manifest_file))
+        for (dep_name, entries) in d
+            entries::Vector{Any}
+            for entry in entries
+                entry = entry::Dict{String, Any}
+                uuid = get(entry, "uuid", nothing)::Union{String, Nothing}
+                uuid === nothing && continue
+                if UUID(uuid) === where.uuid
+                    deps = get(entry, "weakdeps", nothing)::Union{Vector{String}, Dict{String, Any}, Nothing}
+                    if deps isa Vector{String}
+                        # Now we need to collect the UUIDs for all these
+                        d_weak = Dict{String, UUID}()
+                        for name in deps
+                            name_deps = get(d, name, nothing)::Union{Nothing, Vector{Any}}
+                            if name_deps === nothing || length(name_deps) != 1
+                                error("expected a single entry for $(repr(name)) in $(repr(project_file))")
+                            end
+                            entry = first(name_deps::Vector{Any})::Dict{String, Any}
+                            uuid = get(entry, "uuid", nothing)::Union{String, Nothing}
+                            if uuid !== nothing
+                                d_weak[name] = UUID(uuid)
+                            end
+                        end
+                        return d_weak
+                    elseif deps isa Dict{String, Any}
+                        return Dict{String, UUID}(k => UUID(v::String) for (k,v) in deps)
+                    end
+                end
+            end
+        end
+    end
+    return Dict{String, UUID}()
+end
+
+is_weakdep_available(m::Module, s::Symbol) = is_weakdep_available(PkgId(m), s)
+
+function is_weakdep_available(pkg::PkgId, s::Symbol)
+    wpkg = identify_package(pkg, String(s))
+    if wpkg !== nothing && wpkg.weak # maybe remove?
+        if locate_package(wpkg) !== nothing
+            return true
+        end
+    end
+    return false
+end
+
+function _get_weakdeps_uint64_vec(m::Module)
+    vals = UInt64[]
+    weak_deps = collect_weak_deps(m)
+    for uuid in values(weak_deps)
+        v = UInt128(uuid)
+        push!(vals, (v >> 64) % UInt64)
+        push!(vals, (v >> 0 ) % UInt64)
+    end
+    return vals
+end
+
+macro is_weakdep_available(s::Symbol)
+    :(is_weakdep_available($__module__, $s))
+end
 
 # these return either the array of modules loaded from the path / content given
 # or an Exception that describes why it couldn't be loaded
@@ -1846,6 +1924,13 @@ function parse_cache_header(f::IO)
         push!(prefs, String(read(f, n2)))
         totbytes -= n2
     end
+    n_weak_deps = read(f, Int32)
+    totbytes -= 4
+    weak_deps = Set{UUID}()
+    for _ in 1:n_weak_deps
+        push!(weak_deps, UUID((read(f, UInt64), read(f, UInt64))))
+        totbytes -= 16
+    end
     prefs_hash = read(f, UInt64)
     totbytes -= 8
     srctextpos = read(f, Int64)
@@ -1861,7 +1946,7 @@ function parse_cache_header(f::IO)
         build_id = read(f, UInt64) # build id
         push!(required_modules, PkgId(uuid, sym) => build_id)
     end
-    return modules, (includes, requires), required_modules, srctextpos, prefs, prefs_hash
+    return modules, (includes, requires), required_modules, srctextpos, weak_deps, prefs, prefs_hash
 end
 
 function parse_cache_header(cachefile::String; srcfiles_only::Bool=false)
@@ -1900,7 +1985,7 @@ end
 
 
 function cache_dependencies(f::IO)
-    defs, (includes, requires), modules, srctextpos, prefs, prefs_hash = parse_cache_header(f)
+    defs, (includes, requires), modules, srctextpos, weak_deps, prefs, prefs_hash = parse_cache_header(f)
     return modules, map(chi -> (chi.filename, chi.mtime), includes)  # return just filename and mtime
 end
 
@@ -1915,7 +2000,7 @@ function cache_dependencies(cachefile::String)
 end
 
 function read_dependency_src(io::IO, filename::AbstractString)
-    modules, (includes, requires), required_modules, srctextpos, prefs, prefs_hash = parse_cache_header(io)
+    modules, (includes, requires), required_modules, srctextpos, weak_deps, prefs, prefs_hash = parse_cache_header(io)
     srctextpos == 0 && error("no source-text stored in cache file")
     seek(io, srctextpos)
     return _read_dependency_src(io, filename)
@@ -2137,7 +2222,7 @@ end
             @debug "Rejecting cache file $cachefile due to it containing an invalid cache header"
             return true # invalid cache file
         end
-        modules, (includes, requires), required_modules, srctextpos, prefs, prefs_hash = parse_cache_header(io)
+        modules, (includes, requires), required_modules, srctextpos, weak_deps, prefs, prefs_hash = parse_cache_header(io)
         if isempty(modules)
             return true # ignore empty file
         end
@@ -2227,6 +2312,14 @@ end
 
         if !isvalid_file_crc(io)
             @debug "Rejecting cache file $cachefile because it has an invalid checksum"
+            return true
+        end
+
+        curr_weak_deps = collect_weak_deps(id)
+        if values(curr_weak_deps) != weak_deps
+            wd_str = join(weak_deps, ", ")
+            cwd_str = join(values(curr_weak_deps), ", ")
+            @debug "Rejecting cache file $cachefile because weak dependency UUIDs: $wd_str does not match $cwd_str"
             return true
         end
 

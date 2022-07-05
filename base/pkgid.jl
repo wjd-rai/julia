@@ -4,10 +4,10 @@ struct PkgId
     uuid::Union{UUID,Nothing}
     name::String
     weak::Bool
-    PkgId(u::UUID, name::AbstractString) = new(UInt128(u) == 0 ? nothing : u, name, false)
-    PkgId(::Nothing, name::AbstractString) = new(nothing, name, false)
+    PkgId(u::UUID, name::AbstractString, weak::Bool=false) = new(UInt128(u) == 0 ? nothing : u, name, weak)
+    PkgId(::Nothing, name::AbstractString, weak::Bool=false) = new(nothing, name, weak)
 end
-PkgId(name::AbstractString) = PkgId(nothing, name)
+PkgId(name::AbstractString, weak::Bool=false) = PkgId(nothing, name, weak)
 
 function PkgId(m::Module, name::String = String(nameof(moduleroot(m))))
     uuid = UUID(ccall(:jl_module_uuid, NTuple{2, UInt64}, (Any,), m))
@@ -32,8 +32,8 @@ function binpack(pkg::PkgId)
     write(io, UInt8(0))
     uuid = pkg.uuid
     write(io, uuid === nothing ? UInt128(0) : UInt128(uuid))
-    write(io, pkg.name)
     write(io, pkg.weak)
+    write(io, pkg.name)
     return String(take!(io))
 end
 
@@ -41,7 +41,7 @@ function binunpack(s::String)
     io = IOBuffer(s)
     @assert read(io, UInt8) === 0x00
     uuid = read(io, UInt128)
-    name = read(io, String)
     weak = read(io, Bool)
+    name = read(io, String)
     return PkgId(UUID(uuid), name, weak)
 end

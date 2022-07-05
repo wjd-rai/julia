@@ -1483,10 +1483,36 @@ static int64_t write_dependency_list(ios_t *s, jl_array_t **udepsp)
         }
         write_int32(s, 0); // terminator, for ease of reading
 
-        // Calculate Preferences hash for current package.
+        // Calculate weak dependencies
+        jl_value_t *weak_list = NULL;
         jl_value_t *prefs_hash = NULL;
         jl_value_t *prefs_list = NULL;
-        JL_GC_PUSH1(&prefs_list);
+
+        JL_GC_PUSH2(&weak_list, &prefs_list);
+        if (jl_base_module) {
+            // Toplevel module is the module we're currently compiling, use it to get our weak dependencies
+            jl_value_t * toplevel = (jl_value_t*)jl_get_global(jl_base_module, jl_symbol("__toplevel__"));
+            jl_value_t * weak_deps_func = jl_get_global(jl_base_module, jl_symbol("_get_weakdeps_uint64_vec"));
+            if (toplevel && weak_deps_func) {
+                // Temporary invoke in newest world age
+                size_t last_age = ct->world_age;
+                ct->world_age = jl_atomic_load_acquire(&jl_world_counter);
+                jl_value_t *args[2] = {weak_deps_func, (jl_value_t*)toplevel};
+                weak_list = (jl_value_t*)jl_apply(args, 2);
+                size_t i, l = jl_array_len(weak_list);
+                write_int32(s, l);
+                for (i = 0; i < l; i++) {
+                    jl_value_t *val = jl_array_ptr_ref(weak_list, i);
+                    write_uint64(s, jl_unbox_uint64(val));
+                }
+                // Reset world age to normal
+                ct->world_age = last_age;
+            }
+        }
+        if (weak_list == NULL)
+            write_int32(s, 0);
+
+        // Calculate Preferences hash for current package.
         if (jl_base_module) {
             // Toplevel module is the module we're currently compiling, use it to get our preferences hash
             jl_value_t * toplevel = (jl_value_t*)jl_get_global(jl_base_module, jl_symbol("__toplevel__"));
