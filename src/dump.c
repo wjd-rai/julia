@@ -1379,7 +1379,7 @@ static void write_mod_list(ios_t *s, jl_array_t *a)
 }
 
 // "magic" string and version header of .ji file
-static const int JI_FORMAT_VERSION = 11;
+static const int JI_FORMAT_VERSION = 12;
 static const char JI_MAGIC[] = "\373jli\r\n\032\n"; // based on PNG signature
 static const uint16_t BOM = 0xFEFF; // byte-order marker
 static void write_header(ios_t *s)
@@ -1501,9 +1501,12 @@ static int64_t write_dependency_list(ios_t *s, jl_array_t **udepsp)
                 weak_list = (jl_value_t*)jl_apply(args, 2);
                 size_t i, l = jl_array_len(weak_list);
                 write_int32(s, l);
+                printf("C n_weak_deps: %zu\n", l);
+                uint64_t *weak_list_u64 = (uint64_t*)jl_array_data(weak_list);
                 for (i = 0; i < l; i++) {
-                    jl_value_t *val = jl_array_ptr_ref(weak_list, i);
-                    write_uint64(s, jl_unbox_uint64(val));
+                    uint64_t f = weak_list_u64[i];
+                    printf("val = %llu\n", f);
+                    write_uint64(s, f);
                 }
                 // Reset world age to normal
                 ct->world_age = last_age;

@@ -925,6 +925,7 @@ end
 function _get_weakdeps_uint64_vec(m::Module)
     vals = UInt64[]
     weak_deps = collect_weak_deps(m)
+    @show m, weak_deps
     for uuid in values(weak_deps)
         v = UInt128(uuid)
         push!(vals, (v >> 64) % UInt64)
@@ -1925,6 +1926,7 @@ function parse_cache_header(f::IO)
         totbytes -= n2
     end
     n_weak_deps = read(f, Int32)
+    println("n_weak_deps: $n_weak_deps")
     totbytes -= 4
     weak_deps = Set{UUID}()
     for _ in 1:n_weak_deps
