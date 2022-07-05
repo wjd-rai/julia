@@ -1924,16 +1924,13 @@ function parse_cache_header(f::IO)
         push!(prefs, String(read(f, n2)))
         totbytes -= n2
     end
-
-    weak_deps = Set{UUID}()
-    #=
     n_weak_deps = read(f, Int32)
     totbytes -= 4
+    weak_deps = Set{UUID}()
     for _ in 1:n_weak_deps
         push!(weak_deps, UUID((read(f, UInt64), read(f, UInt64))))
         totbytes -= 16
     end
-    =#
     prefs_hash = read(f, UInt64)
     totbytes -= 8
     srctextpos = read(f, Int64)
@@ -2318,7 +2315,6 @@ end
             return true
         end
 
-        #=
         curr_weak_deps = collect_weak_deps(id)
         if values(curr_weak_deps) != weak_deps
             wd_str = join(weak_deps, ", ")
@@ -2326,7 +2322,6 @@ end
             @debug "Rejecting cache file $cachefile because weak dependency UUIDs: $wd_str does not match $cwd_str"
             return true
         end
-        =#
 
         curr_prefs_hash = get_preferences_hash(id.uuid, prefs)
         if prefs_hash != curr_prefs_hash
