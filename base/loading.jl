@@ -858,7 +858,15 @@ end
 # use an Int counter so that nested @time_imports calls all remain open
 const TIMING_IMPORTS = Threads.Atomic{Int}(0)
 
-collect_weak_deps(where::Module) = collect_weak_deps(PkgId(where))
+collect_installed_weak_deps(where::Module) = collect_installed_weak_deps(PkgId(where))
+function collect_installed_weak_deps(where::PkgId)
+    weak_deps = collect_weak_deps(where)
+    # Now filter only those that are installed.
+    weak_deps_installed = filter(weak_deps) do (name, uuid)
+        locate_package(PkgId(uuid, name)) !== nothing
+    end
+    return weak_deps_installed
+end
 function collect_weak_deps(where::PkgId)
     # Check if this is the project
     envs = Base.load_path()
@@ -922,7 +930,7 @@ end
 
 function _get_weakdeps_uint64_vec(m::Module)
     vals = UInt64[]
-    weak_deps = collect_weak_deps(m)
+    weak_deps = collect_installed_weak_deps(m)
     for uuid in values(weak_deps)
         v = UInt128(uuid)
         push!(vals, (v >> 64) % UInt64)
@@ -2310,11 +2318,9 @@ end
             return true
         end
 
-        curr_weak_deps = collect_weak_deps(id)
+        curr_weak_deps = collect_installed_weak_deps(id)
         
         if Set(values(curr_weak_deps)) != weak_deps
-            @show weak_deps
-            @show values(curr_weak_deps)
             wd_str = join(weak_deps, ", ")
             cwd_str = join(values(curr_weak_deps), ", ")
             @debug "Rejecting cache file $cachefile because weak dependency UUIDs: $wd_str does not match $cwd_str"
