@@ -1500,12 +1500,10 @@ static int64_t write_dependency_list(ios_t *s, jl_array_t **udepsp)
                 jl_value_t *args[2] = {weak_deps_func, (jl_value_t*)toplevel};
                 weak_list = (jl_value_t*)jl_apply(args, 2);
                 size_t i, l = jl_array_len(weak_list);
-                write_int32(s, l);
-                printf("C n_weak_deps: %zu\n", l);
+                write_int32(s, l / 2); // Two uint64 per weak dependency
                 uint64_t *weak_list_u64 = (uint64_t*)jl_array_data(weak_list);
                 for (i = 0; i < l; i++) {
                     uint64_t f = weak_list_u64[i];
-                    printf("val = %llu\n", f);
                     write_uint64(s, f);
                 }
                 // Reset world age to normal
