@@ -873,6 +873,65 @@ precompile_test_harness("code caching") do dir
     @test hasvalid(mi, world)       # was compiled with the new method
 end
 
+precompile_test_harness("invoke") do dir
+    InvokeModule = :Invoke0x030e7e97c2365aad
+    CallerModule = :Caller0x030e7e97c2365aad
+    write(joinpath(dir, "$InvokeModule.jl"),
+          """
+          module $InvokeModule
+              export f, g
+              # f is for testing invoke that occurs within a dependency
+              f(x::Real) = 0
+              f(x::Int) = x < 5 ? 1 : invoke(f, Tuple{Real}, x)
+              # f is for testing invoke that occurs from a dependent
+              g(x::Real) = 0
+              g(x::Int) = 1
+          end
+          """)
+          write(joinpath(dir, "$CallerModule.jl"),
+          """
+          module $CallerModule
+              using $InvokeModule
+              callf(x) = f(x)
+              function callg(x)
+                  Base.Experimental.@force_compile
+                  x < 5 ? g(x) : invoke(g, Tuple{Real}, x)
+              end
+              # force precompilation
+              callf(3)
+              callg(3)
+            #   # debugging below here
+            #   m = nothing
+            #   for func in (f, g)
+            #     for mtmp in methods(f)
+            #         if mtmp.sig.parameters[2] === Real
+            #             global m = mtmp
+            #             break
+            #         end
+            #     end
+            #     mi = m.specializations[1]
+            #     println(mi)
+            #     display(mi.backedges)
+            #   end
+          end
+          """)
+    Base.compilecache(Base.PkgId(string(CallerModule)))
+    @eval using $CallerModule
+    M = getfield(@__MODULE__, CallerModule)
+    m = nothing
+    for mtmp in methods(M.f)
+        if mtmp.sig.parameters[2] === Real
+            m = mtmp
+            break
+        end
+    end
+    mi = m.specializations[1]
+    @test_broken length(mi.backedges) == 2
+    @test mi.backedges[1] === Tuple{typeof(M.f), Real}
+    @test isa(mi.backedges[2], Core.MethodInstance)
+    @test_broken mi.cache.max_world == typemax(mi.cache.max_world)
+end
+
 # test --compiled-modules=no command line option
 precompile_test_harness("--compiled-modules=no") do dir
     Time_module = :Time4b3a94a1a081a8cb
