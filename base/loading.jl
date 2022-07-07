@@ -878,6 +878,7 @@ function collect_weak_deps(where::PkgId)
     if proj == where
         d = parsed_toml(project_file)
         weak_deps = get(d, "weakdeps", nothing)::Union{Dict{String, Any}, Nothing}
+        weak_deps === nothing && return Dict{String, UUID}()
         return Dict{String, UUID}(k => UUID(v::String) for (k,v) in weak_deps)
     else
         manifest_file = project_file_manifest_path(project_file)
