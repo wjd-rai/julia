@@ -800,6 +800,7 @@ export
     evalfile,
     include_string,
     include_dependency,
+    @hasdep,
 
 # RTS internals
     GC,

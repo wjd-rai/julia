@@ -917,16 +917,19 @@ function collect_weak_deps(where::PkgId)
     return Dict{String, UUID}()
 end
 
-is_package_available(m::Module, s::Symbol) = is_package_available(PkgId(m), s)
+hasdep(m::Module, deps::Symbol...) = hasdep(PkgId(m), deps...)
 
-function is_package_available(pkg::PkgId, s::Symbol)
-    wpkg = identify_package(pkg, String(s))
-    if wpkg !== nothing
-        if locate_package(wpkg) !== nothing
-            return true
-        end
+function hasdep(pkg::PkgId, deps::Symbol...)
+    for dep in deps
+        wpkg = identify_package(pkg, String(dep))
+        wpkg === nothing && return false
+        locate_package(wpkg) === nothing && return false
     end
-    return false
+    return true
+end
+
+macro hasdep(weakdeps::Symbol...)
+    :(hasdep($__module__, $(weakdeps)...))
 end
 
 function _get_weakdeps_uint64_vec(m::Module)
