@@ -928,6 +928,20 @@ function hasdep(pkg::PkgId, deps::Symbol...)
     return true
 end
 
+"""
+    @hasdep(A, B, ...)
+
+Check if a packages `A` and `B`, ... are loadable.
+This should be used to guard loading weak dependencies (which might
+not be avaiable for loading), for example:
+
+```jl
+if @hasdep A
+    import A
+    foo(x::A.T) = ...
+end
+```
+"""
 macro hasdep(weakdeps::Symbol...)
     :(hasdep($__module__, $(weakdeps)...))
 end
