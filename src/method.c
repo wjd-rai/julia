@@ -800,11 +800,13 @@ int get_next_backedge(jl_array_t *list, int i, jl_value_t** invokesig, jl_method
         *caller = (jl_method_instance_t*)item;
         return i + 1;
     }
+    assert(jl_is_type(item));
     // An `invoke` call, it's a (sig, MethodInstance) pair
     if (invokesig != NULL)
         *invokesig = item;
     *caller = (jl_method_instance_t*)jl_array_ptr_ref(list, i + 1);
-    assert(jl_is_method_instance(*caller));
+    if (*caller)
+        assert(jl_is_method_instance(*caller));
     return i + 2;
 }
 
