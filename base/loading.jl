@@ -330,10 +330,10 @@ julia> Base.identify_package(LinearAlgebra, "Pkg") # Pkg is not a dependency of 
 ````
 """
 identify_package(where::Module, name::String) = identify_package(PkgId(where), name)
-function identify_package(where::PkgId, name::String)::Union{Nothing,PkgId}
+function identify_package(where::PkgId, name::String, envs::Vector{String}=load_path())::Union{Nothing,PkgId}
     where.name === name && return where
-    where.uuid === nothing && return identify_package(name) # ignore `where`
-    for env in load_path()
+    where.uuid === nothing && return identify_package(name, envs) # ignore `where`
+    for env in envs
         pkgid = manifest_deps_get(env, where, name)
         pkgid === nothing && continue # not found--keep looking
         pkgid.uuid === nothing || return pkgid # found in explicit environment--use it
@@ -341,8 +341,8 @@ function identify_package(where::PkgId, name::String)::Union{Nothing,PkgId}
     end
     return nothing
 end
-function identify_package(name::String)::Union{Nothing,PkgId}
-    for env in load_path()
+function identify_package(name::String, envs::Vector{String}=load_path())::Union{Nothing,PkgId}
+    for env in envs
         uuid = project_deps_get(env, name)
         uuid === nothing || return uuid # found--return it
     end
@@ -922,7 +922,7 @@ hasdep(m::Module, deps::Symbol...) = hasdep(PkgId(m), deps...)
 function hasdep(pkg::PkgId, deps::Symbol...)
     envs = [first(load_path())]
     for dep in deps
-        wpkg = identify_package(pkg, String(dep))
+        wpkg = identify_package(pkg, String(dep), envs)
         wpkg === nothing && return false
         locate_package(wpkg, envs) === nothing && return false
     end
