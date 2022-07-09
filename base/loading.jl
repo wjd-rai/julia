@@ -920,10 +920,11 @@ end
 hasdep(m::Module, deps::Symbol...) = hasdep(PkgId(m), deps...)
 
 function hasdep(pkg::PkgId, deps::Symbol...)
+    envs = [first(load_path())]
     for dep in deps
         wpkg = identify_package(pkg, String(dep))
         wpkg === nothing && return false
-        locate_package(wpkg) === nothing && return false
+        locate_package(wpkg, envs) === nothing && return false
     end
     return true
 end
