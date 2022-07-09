@@ -350,7 +350,7 @@ function identify_package(name::String)::Union{Nothing,PkgId}
 end
 
 """
-    Base.locate_package(pkg::PkgId)::Union{String, Nothing}
+    Base.locate_package(pkg::PkgId, envs = load_path())::Union{String, Nothing}
 
 The path to the entry-point file for the package corresponding to the identifier
 `pkg`, or `nothing` if not found. See also [`identify_package`](@ref).
@@ -363,9 +363,9 @@ julia> Base.locate_package(pkg)
 "/path/to/julia/stdlib/v$(VERSION.major).$(VERSION.minor)/Pkg/src/Pkg.jl"
 ```
 """
-function locate_package(pkg::PkgId)::Union{Nothing,String}
+function locate_package(pkg::PkgId, envs::Vector{String} = load_path())::Union{Nothing,String}
     if pkg.uuid === nothing
-        for env in load_path()
+        for env in envs
             # look for the toplevel pkg `pkg.name` in this entry
             found = project_deps_get(env, pkg.name)
             if found !== nothing
@@ -379,7 +379,7 @@ function locate_package(pkg::PkgId)::Union{Nothing,String}
             end
         end
     else
-        for env in load_path()
+        for env in envs
             path = manifest_uuid_path(env, pkg)
             path === nothing || return entry_path(path, pkg.name)
         end
@@ -860,18 +860,18 @@ const TIMING_IMPORTS = Threads.Atomic{Int}(0)
 
 collect_installed_weak_deps(where::Module) = collect_installed_weak_deps(PkgId(where))
 function collect_installed_weak_deps(where::PkgId)
-    weak_deps = collect_weak_deps(where)
-    # Now filter only those that are installed.
-    weak_deps_installed = filter(weak_deps) do (name, uuid)
-        locate_package(PkgId(uuid, name)) !== nothing
-    end
-    return weak_deps_installed
-end
-function collect_weak_deps(where::PkgId)
-    # Check if this is the project
     envs = Base.load_path()
     isempty(envs) && return nothing
     env = first(envs)
+    weak_deps = collect_weak_deps(where, env)
+    # Now filter only those that are installed.
+    weak_deps_installed = filter(weak_deps) do (name, uuid)
+        locate_package(PkgId(uuid, name), [env]) !== nothing
+    end
+    return weak_deps_installed
+end
+function collect_weak_deps(where::PkgId, env::String)
+    # Check if this is the project
     project_file = env_project_file(env)
     project_file isa String || return Dict{String, UUID}()
     proj = project_file_name_uuid(project_file, where.name)
@@ -2337,7 +2337,7 @@ end
         end
 
         curr_weak_deps = collect_installed_weak_deps(id)
-        
+
         if Set(values(curr_weak_deps)) != weak_deps
             wd_str = join(weak_deps, ", ")
             cwd_str = join(values(curr_weak_deps), ", ")
