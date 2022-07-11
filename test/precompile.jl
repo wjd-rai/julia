@@ -879,28 +879,44 @@ precompile_test_harness("invoke") do dir
     write(joinpath(dir, "$InvokeModule.jl"),
           """
           module $InvokeModule
-              export f, g
+              export f, g, h
               # f is for testing invoke that occurs within a dependency
               f(x::Real) = 0
               f(x::Int) = x < 5 ? 1 : invoke(f, Tuple{Real}, x)
-              # f is for testing invoke that occurs from a dependent
+              # g is for testing invoke that occurs from a dependent
               g(x::Real) = 0
               g(x::Int) = 1
+              # h will be entirely superseded by a new method (full invalidation)
+              h(x::Real) = 0
+              h(x::Int) = x < 5 ? 1 : invoke(h, Tuple{Integer}, x)
           end
           """)
           write(joinpath(dir, "$CallerModule.jl"),
           """
           module $CallerModule
               using $InvokeModule
+              # involving external modules
               callf(x) = f(x)
-              function callg(x)
-                  Base.Experimental.@force_compile
-                  x < 5 ? g(x) : invoke(g, Tuple{Real}, x)
-              end
+              callg(x) = x < 5 ? g(x) : invoke(g, Tuple{Real}, x)
+              callh(x) = h(x)
+
+              # Purely internal
+              internal(x::Real) = 0
+              internal(x::Int) = x < 5 ? 1 : invoke(internal, Tuple{Real}, x)
+
               # force precompilation
-              callf(3)
-              callg(3)
-            #   # debugging below here
+              begin
+                  Base.Experimental.@force_compile
+                  callf(3)
+                  callg(3)
+                  callh(3)
+                  internal(3)
+              end
+
+              # Now that we've precompiled, invalidate with a new method that overrides the `invoke` dispatch
+              $InvokeModule.h(x::Integer) = -1
+
+              #   # debugging below here
             #   m = nothing
             #   for func in (f, g)
             #     for mtmp in methods(f)
@@ -918,18 +934,32 @@ precompile_test_harness("invoke") do dir
     Base.compilecache(Base.PkgId(string(CallerModule)))
     @eval using $CallerModule
     M = getfield(@__MODULE__, CallerModule)
-    m = nothing
-    for mtmp in methods(M.f)
-        if mtmp.sig.parameters[2] === Real
-            m = mtmp
-            break
+
+    function get_real_method(func)
+        m = nothing
+        for mtmp in methods(func)
+            if mtmp.sig.parameters[2] === Real
+                m = mtmp
+                break
+            end
         end
+        return m::Method
     end
+
+    for func in (M.f, M.g, M.internal)
+        m = get_real_method(func)
+        mi = m.specializations[1]
+        @show func length(mi.backedges)
+        @test length(mi.backedges) == 2                          # FIXME
+        @test mi.backedges[1] === Tuple{typeof(func), Real}
+        @test isa(mi.backedges[2], Core.MethodInstance)
+        @test mi.cache.max_world == typemax(mi.cache.max_world)  # FIXME
+    end
+
+    m = get_real_method(M.h)
     mi = m.specializations[1]
-    @test_broken length(mi.backedges) == 2
-    @test mi.backedges[1] === Tuple{typeof(M.f), Real}
-    @test isa(mi.backedges[2], Core.MethodInstance)
-    @test_broken mi.cache.max_world == typemax(mi.cache.max_world)
+    @test !isdefined(mi, :backedges)
+    @test !isdefined(mi, :cache)
 end
 
 # test --compiled-modules=no command line option
