@@ -2305,29 +2305,53 @@ void remove_code_instance_from_validation(jl_code_instance_t *codeinst)
 
 static void jl_insert_method_instances(jl_array_t *list)
 {
-    size_t i = 0, i0, l = jl_array_len(list);
+    size_t i, l = jl_array_len(list);
     // Validate the MethodInstances
     jl_array_t *valids = jl_alloc_array_1d(jl_array_uint8_type, l);
     memset(jl_array_data(valids), 1, l);
     size_t world = jl_atomic_load_acquire(&jl_world_counter);
-    jl_value_t *invokeTypes;
-    jl_method_instance_t *mi;
-    while (i < l) {
-        i0 = i;
-        i = get_next_backedge(list, i, &invokeTypes, &mi);
+    for (i = 0; i < l; i++) {
+        jl_method_instance_t *mi = (jl_method_instance_t*)jl_array_ptr_ref(list, i);
         assert(jl_is_method_instance(mi));
         if (jl_is_method(mi->def.method)) {
-            if (!invokeTypes)
-                invokeTypes = (jl_value_t*)mi->specTypes;
             // Is this still the method we'd be calling?
             jl_methtable_t *mt = jl_method_table_for(mi->specTypes);
-            struct jl_typemap_assoc search = {invokeTypes, world, NULL, 0, ~(size_t)0};
+            struct jl_typemap_assoc search = {(jl_value_t*)mi->specTypes, world, NULL, 0, ~(size_t)0};
             jl_typemap_entry_t *entry = jl_typemap_assoc_by_type(mt->defs, &search, /*offs*/0, /*subtype*/1);
             if (entry) {
                 jl_value_t *mworld = entry->func.value;
                 if (jl_is_method(mworld) && mi->def.method != (jl_method_t*)mworld && jl_type_morespecific(((jl_method_t*)mworld)->sig, mi->def.method->sig)) {
-                    jl_array_uint8_set(valids, i0, 0);
-                    invalidate_backedges(&remove_code_instance_from_validation, mi, world, "jl_insert_method_instance");
+                    // There's still a chance this is valid, if all callers made this via `invoke` and the invoke-signature is still valid
+                    assert(mi->backedges);   // should not be NULL if it's on `list`
+                    jl_value_t *invokeTypes;
+                    jl_method_instance_t *caller;
+                    size_t jins = 0, j0, j = 0, nbe = jl_array_len(mi->backedges);
+                    while (j < nbe) {
+                        j0 = j;
+                        j = get_next_backedge(mi->backedges, j, &invokeTypes, &caller);
+                        if (invokeTypes) {
+                            struct jl_typemap_assoc search = {invokeTypes, world, NULL, 0, ~(size_t)0};
+                            entry = jl_typemap_assoc_by_type(mt->defs, &search, /*offs*/0, /*subtype*/1);
+                            if (entry) {
+                                jl_value_t *imworld = entry->func.value;
+                                if (jl_is_method(imworld) && mi->def.method == (jl_method_t*)imworld) {
+                                    // this one is OK
+                                    // in case we deleted some earlier ones, move this earlier
+                                    for (; j0 < j; jins++, j0++) {
+                                        jl_array_ptr_set(mi->backedges, jins, jl_array_ptr_ref(mi->backedges, j0));
+                                    }
+                                    continue;
+                                }
+                            }
+                        }
+                        invalidate_backedges(&remove_code_instance_from_validation, caller, world, "jl_insert_method_instance");
+                    }
+                    jl_array_del_end(mi->backedges, j - jins);
+                    if (jins == 0) {
+                        // None of the callers were valid, so invalidate `mi` too
+                        jl_array_uint8_set(valids, i, 0);
+                        invalidate_backedges(&remove_code_instance_from_validation, mi, world, "jl_insert_method_instance");
+                    }
                     // The codeinst of this mi haven't yet been removed
                     jl_code_instance_t *codeinst = mi->cache;
                     while (codeinst) {
