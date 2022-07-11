@@ -1173,7 +1173,7 @@ static void jl_collect_missing_backedges_to_mod(jl_methtable_t *mt)
             if (*edges == HT_NOTFOUND)
                 *edges = jl_alloc_vec_any(0);
             // To stay synchronized with the format from MethodInstances (specifically for `invoke`d calls),
-            // we have to push a pair of values.
+            // we have to push a pair of values. But in this case the callee is unknown, so we leave it NULL.
             push_backedge(*edges, missing_callee, NULL);
         }
     }
@@ -2321,7 +2321,7 @@ static void jl_insert_method_instances(jl_array_t *list)
             if (entry) {
                 jl_value_t *mworld = entry->func.value;
                 if (jl_is_method(mworld) && mi->def.method != (jl_method_t*)mworld && jl_type_morespecific(((jl_method_t*)mworld)->sig, mi->def.method->sig)) {
-                    // There's still a chance this is valid, if all callers made this via `invoke` and the invoke-signature is still valid
+                    // There's still a chance this is valid, if any caller made this via `invoke` and the invoke-signature is still valid
                     assert(mi->backedges);   // should not be NULL if it's on `list`
                     jl_value_t *invokeTypes;
                     jl_method_instance_t *caller;
