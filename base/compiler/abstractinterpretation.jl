@@ -774,6 +774,11 @@ function collect_const_args(argtypes::Vector{Any})
                 end for i = 2:length(argtypes) ]
 end
 
+function invoke_signature(invokesig::Vector{Any})
+    f, argtyps = collect_const_args(invokesig[1:3])
+    return Tuple{Core.Typeof(f), argtyps.parameters...}
+end
+
 function concrete_eval_call(interp::AbstractInterpreter,
     @nospecialize(f), result::MethodCallResult, arginfo::ArgInfo, sv::InferenceState)
     concrete_eval_eligible(interp, f, result, arginfo, sv) || return nothing

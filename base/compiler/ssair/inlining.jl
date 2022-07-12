@@ -29,7 +29,9 @@ pass to apply its own inlining policy decisions.
 struct DelayedInliningSpec
     match::Union{MethodMatch, InferenceResult}
     argtypes::Vector{Any}
+    invokesig    # either nothing or a signature
 end
+DelayedInliningSpec(match, argtypes) = DelayedInliningSpec(match, argtypes, nothing)
 
 struct InliningTodo
     # The MethodInstance to be inlined
@@ -37,11 +39,11 @@ struct InliningTodo
     spec::Union{ResolvedInliningSpec, DelayedInliningSpec}
 end
 
-InliningTodo(mi::MethodInstance, match::MethodMatch, argtypes::Vector{Any}) =
-    InliningTodo(mi, DelayedInliningSpec(match, argtypes))
+InliningTodo(mi::MethodInstance, match::MethodMatch, argtypes::Vector{Any}, invokesig=nothing) =
+    InliningTodo(mi, DelayedInliningSpec(match, argtypes, invokesig))
 
-InliningTodo(result::InferenceResult, argtypes::Vector{Any}) =
-    InliningTodo(result.linfo, DelayedInliningSpec(result, argtypes))
+InliningTodo(result::InferenceResult, argtypes::Vector{Any}, invokesig=nothing) =
+    InliningTodo(result.linfo, DelayedInliningSpec(result, argtypes, invokesig))
 
 struct ConstantCase
     val::Any
@@ -810,7 +812,7 @@ end
 
 function resolve_todo(todo::InliningTodo, state::InliningState, flag::UInt8)
     mi = todo.mi
-    (; match, argtypes) = todo.spec::DelayedInliningSpec
+    (; match, argtypes, invokesig) = todo.spec::DelayedInliningSpec
     et = state.et
 
     #XXX: update_valid_age!(min_valid[1], max_valid[1], sv)
@@ -818,7 +820,7 @@ function resolve_todo(todo::InliningTodo, state::InliningState, flag::UInt8)
         inferred_src = match.src
         if isa(inferred_src, ConstAPI)
             # use constant calling convention
-            et !== nothing && push!(et, mi)
+            et !== nothing && push!(et, invokesig, mi)
             return ConstantCase(quoted(inferred_src.val))
         else
             src = inferred_src # ::Union{Nothing,CodeInfo} for NativeInterpreter
@@ -829,7 +831,7 @@ function resolve_todo(todo::InliningTodo, state::InliningState, flag::UInt8)
         if code isa CodeInstance
             if use_const_api(code)
                 # in this case function can be inlined to a constant
-                et !== nothing && push!(et, mi)
+                et !== nothing && push!(et, invokesig, mi)
                 return ConstantCase(quoted(code.rettype_const))
             else
                 src = code.inferred
@@ -851,7 +853,7 @@ function resolve_todo(todo::InliningTodo, state::InliningState, flag::UInt8)
 
     src === nothing && return compileable_specialization(et, match, effects)
 
-    et !== nothing && push!(et, mi)
+    et !== nothing && push!(et, invokesig, mi)
     return InliningTodo(mi, retrieve_ir_for_inlining(mi, src), effects)
 end
 
@@ -873,7 +875,7 @@ function validate_sparams(sparams::SimpleVector)
     return true
 end
 
-function analyze_method!(match::MethodMatch, argtypes::Vector{Any},
+function analyze_method!(match::MethodMatch, argtypes::Vector{Any}, invokesig,
                          flag::UInt8, state::InliningState,
                          do_resolve::Bool = true)
     method = match.method
@@ -906,7 +908,7 @@ function analyze_method!(match::MethodMatch, argtypes::Vector{Any},
     mi = specialize_method(match; preexisting=true) # Union{Nothing, MethodInstance}
     isa(mi, MethodInstance) || return compileable_specialization(et, match, Effects())
 
-    todo = InliningTodo(mi, match, argtypes)
+    todo = InliningTodo(mi, match, argtypes, invokesig)
     # If we don't have caches here, delay resolving this MethodInstance
     # until the batch inlining step (or an external post-processing pass)
     do_resolve && state.mi_cache === nothing && return todo
@@ -1101,9 +1103,10 @@ function inline_invoke!(
     if isa(result, ConcreteResult)
         item = concrete_result_item(result, state)
     else
+        invokesig = invoke_signature(sig.argtypes)
         argtypes = invoke_rewrite(sig.argtypes)
         if isa(result, ConstPropResult)
-            (; mi) = item = InliningTodo(result.result, argtypes)
+            (; mi) = item = InliningTodo(result.result, argtypes, invokesig)
             validate_sparams(mi.sparam_vals) || return nothing
             if argtypes_to_type(argtypes) <: mi.def.sig
                 state.mi_cache !== nothing && (item = resolve_todo(item, state, flag))
@@ -1111,7 +1114,7 @@ function inline_invoke!(
                 return nothing
             end
         end
-        item = analyze_method!(match, argtypes, flag, state)
+        item = analyze_method!(match, argtypes, invokesig, flag, state)
     end
     handle_single_case!(ir, idx, stmt, item, todo, state.params, true)
     return nothing
@@ -1326,7 +1329,7 @@ function handle_match!(
     # during abstract interpretation: for the purpose of inlining, we can just skip
     # processing this dispatch candidate
     _any(case->case.sig === spec_types, cases) && return true
-    item = analyze_method!(match, argtypes, flag, state, do_resolve)
+    item = analyze_method!(match, argtypes, nothing, flag, state, do_resolve)
     item === nothing && return false
     push!(cases, InliningCase(spec_types, item))
     return true
@@ -1426,7 +1429,7 @@ function assemble_inline_todo!(ir::IRCode, state::InliningState)
                 if isa(result, ConcreteResult)
                     item = concrete_result_item(result, state)
                 else
-                    item = analyze_method!(info.match, sig.argtypes, flag, state)
+                    item = analyze_method!(info.match, sig.argtypes, nothing, flag, state)
                 end
                 handle_single_case!(ir, idx, stmt, item, todo, state.params)
             end

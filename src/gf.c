@@ -1506,7 +1506,7 @@ JL_DLLEXPORT void jl_method_instance_add_backedge(jl_method_instance_t *callee, 
         jl_method_instance_t *mi;
         while (i < l) {
             i = get_next_backedge(callee->backedges, i, &invokeTypes, &mi);
-            if (mi == caller && invokesig == invokeTypes)  {
+            if (mi == caller && jl_egal(invokesig, invokeTypes))  {
                 found = 1;
                 break;
             }

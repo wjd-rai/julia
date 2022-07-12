@@ -486,8 +486,7 @@ function add_backedge!(li::MethodInstance, caller::InferenceState, invokesig::Un
         edges = caller.stmt_edges[caller.currpc] = []
     end
     if invokesig !== nothing
-        f, argtyps = collect_const_args(invokesig[1:3])
-        push!(edges, Tuple{Core.Typeof(f), argtyps.parameters...})
+        push!(edges, invoke_signature(invokesig))
     end
     push!(edges, li)
     return nothing
