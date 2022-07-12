@@ -29,7 +29,7 @@ pass to apply its own inlining policy decisions.
 struct DelayedInliningSpec
     match::Union{MethodMatch, InferenceResult}
     argtypes::Vector{Any}
-    invokesig    # either nothing or a signature
+    invokesig    # either nothing or a signature (signature is for an `invoke` call)
 end
 DelayedInliningSpec(match, argtypes) = DelayedInliningSpec(match, argtypes, nothing)
 

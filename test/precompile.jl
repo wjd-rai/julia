@@ -915,20 +915,6 @@ precompile_test_harness("invoke") do dir
 
               # Now that we've precompiled, invalidate with a new method that overrides the `invoke` dispatch
               $InvokeModule.h(x::Integer) = -1
-
-              #   # debugging below here
-            #   m = nothing
-            #   for func in (f, g)
-            #     for mtmp in methods(f)
-            #         if mtmp.sig.parameters[2] === Real
-            #             global m = mtmp
-            #             break
-            #         end
-            #     end
-            #     mi = m.specializations[1]
-            #     println(mi)
-            #     display(mi.backedges)
-            #   end
           end
           """)
     Base.compilecache(Base.PkgId(string(CallerModule)))
@@ -945,11 +931,10 @@ precompile_test_harness("invoke") do dir
     for func in (M.f, M.g, M.internal)
         m = get_real_method(func)
         mi = m.specializations[1]
-        @show m mi.backedges
-        @test length(mi.backedges) == 2                          # FIXME
+        @test length(mi.backedges) == 2
         @test mi.backedges[1] === Tuple{typeof(func), Real}
         @test isa(mi.backedges[2], Core.MethodInstance)
-        @test mi.cache.max_world == typemax(mi.cache.max_world)  # FIXME
+        @test mi.cache.max_world == typemax(mi.cache.max_world)
     end
 
     m = get_real_method(M.h)

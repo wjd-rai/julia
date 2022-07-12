@@ -1506,7 +1506,10 @@ JL_DLLEXPORT void jl_method_instance_add_backedge(jl_method_instance_t *callee, 
         jl_method_instance_t *mi;
         while (i < l) {
             i = get_next_backedge(callee->backedges, i, &invokeTypes, &mi);
-            if (mi == caller && jl_egal(invokesig, invokeTypes))  {
+            // TODO: it would be better to canonicalize (how?) the Tuple-type so
+            // that we don't have to call `jl_egal`
+            if (mi == caller && ((invokesig == NULL && invokeTypes == NULL) ||
+                                 (invokesig && invokeTypes && jl_egal(invokesig, invokeTypes)))) {
                 found = 1;
                 break;
             }
