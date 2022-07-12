@@ -935,21 +935,17 @@ precompile_test_harness("invoke") do dir
     @eval using $CallerModule
     M = getfield(@__MODULE__, CallerModule)
 
-    function get_real_method(func)
-        m = nothing
-        for mtmp in methods(func)
-            if mtmp.sig.parameters[2] === Real
-                m = mtmp
-                break
-            end
+    function get_real_method(func)   # return the method func(::Real)
+        for m in methods(func)
+            m.sig.parameters[end] === Real && return m
         end
-        return m::Method
+        error("no ::Real method found for $func")
     end
 
     for func in (M.f, M.g, M.internal)
         m = get_real_method(func)
         mi = m.specializations[1]
-        @show func length(mi.backedges)
+        @show m mi.backedges
         @test length(mi.backedges) == 2                          # FIXME
         @test mi.backedges[1] === Tuple{typeof(func), Real}
         @test isa(mi.backedges[2], Core.MethodInstance)

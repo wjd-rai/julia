@@ -369,7 +369,8 @@ static size_t queue_external_mis(jl_array_t *list)
                     jl_code_instance_t *ci = mi->cache;
                     int relocatable = 0;
                     while (ci) {
-                        relocatable |= ci->relocatability;
+                        if (ci->max_world == ~(size_t)0)
+                            relocatable |= ci->relocatability;
                         ci = ci->next;
                     }
                     if (relocatable && ptrhash_get(&external_mis, mi) == HT_NOTFOUND) {

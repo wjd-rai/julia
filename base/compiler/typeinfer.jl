@@ -314,6 +314,7 @@ function CodeInstance(
     end
     relocatability = isa(inferred_result, Vector{UInt8}) ? inferred_result[end] :
                      inferred_result === nothing ? UInt8(1) : UInt8(0)
+    # relocatability = isa(inferred_result, Vector{UInt8}) ? inferred_result[end] : UInt8(0)
     return CodeInstance(result.linfo,
         widenconst(result_type), rettype_const, inferred_result,
         const_flags, first(valid_worlds), last(valid_worlds),
