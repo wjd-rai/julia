@@ -2346,13 +2346,18 @@ static void jl_insert_method_instances(jl_array_t *list)
                             }
                         }
                         invalidate_backedges(&remove_code_instance_from_validation, caller, world, "jl_insert_method_instance");
+                        // The codeinst of this mi haven't yet been removed
+                        jl_code_instance_t *codeinst = caller->cache;
+                        while (codeinst) {
+                            remove_code_instance_from_validation(codeinst);
+                            codeinst = codeinst->next;
+                        }
                     }
                     jl_array_del_end(mi->backedges, j - jins);
                     if (jins == 0) {
                         // None of the callers were valid, so invalidate `mi` too
                         jl_array_uint8_set(valids, i, 0);
                         invalidate_backedges(&remove_code_instance_from_validation, mi, world, "jl_insert_method_instance");
-                        // The codeinst of this mi haven't yet been removed
                         jl_code_instance_t *codeinst = mi->cache;
                         while (codeinst) {
                             remove_code_instance_from_validation(codeinst);

@@ -938,9 +938,7 @@ precompile_test_harness("invoke") do dir
     end
 
     m = get_real_method(M.h)
-    mi = m.specializations[1]
-    @test !isdefined(mi, :backedges)
-    @test !isdefined(mi, :cache)
+    @test isempty(m.specializations)
 end
 
 # test --compiled-modules=no command line option
