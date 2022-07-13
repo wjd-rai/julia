@@ -803,8 +803,10 @@ function collect_const_args(argtypes::Vector{Any})
 end
 
 function invoke_signature(invokesig::Vector{Any})
-    f, argtyps = collect_const_args(invokesig[1:3])
-    return Tuple{Core.Typeof(f), unwrap_unionall(argtyps).parameters...}
+    unwrapconst(x) = isa(x, Const) ? x.val : x
+
+    f, argtyps = unwrapconst(invokesig[2]), unwrapconst(invokesig[3])
+    return Tuple{typeof(f), unwrap_unionall(argtyps).parameters...}
 end
 
 function concrete_eval_call(interp::AbstractInterpreter,
