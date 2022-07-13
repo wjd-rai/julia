@@ -171,3 +171,34 @@ let effects = Base.infer_effects(f_setfield_nothrow, ())
     #@test Core.Compiler.is_effect_free(effects)
     @test Core.Compiler.is_nothrow(effects)
 end
+
+@testset "effects analysis on array ops" begin
+    @noinline construct_array(@nospecialize(T), args...) = Array{T}(undef, args...)
+
+    # should eliminate safe but dead allocations
+    good_dims = 1:10
+    for dim in good_dims, N in 0:10
+        dims = ntuple(i->dim, N)
+        @test @eval Base.infer_effects() do
+            $construct_array(Int, $(dims...))
+        end |> Core.Compiler.is_removable_if_unused
+        @test @eval fully_eliminated() do
+            $construct_array(Int, $(dims...))
+            nothing
+        end
+    end
+
+    # should analyze throwness correctly
+    bad_dims = [-1, typemax(Int)]
+    for dim in bad_dims, N in 1:10
+        dims = ntuple(i->dim, N)
+        @test @eval Base.infer_effects() do
+            $construct_array(Int, $(dims...))
+        end |> !Core.Compiler.is_removable_if_unused
+        @test @eval !fully_eliminated() do
+            $construct_array(Int, $(dims...))
+            nothing
+        end
+        @test_throws "invalid Array" @eval $construct_array(Int, $(dims...))
+    end
+end
