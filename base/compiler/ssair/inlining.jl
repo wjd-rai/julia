@@ -820,7 +820,7 @@ function resolve_todo(todo::InliningTodo, state::InliningState, flag::UInt8)
         inferred_src = match.src
         if isa(inferred_src, ConstAPI)
             # use constant calling convention
-            et !== nothing && push!(et, invokesig, mi)
+            et !== nothing && add_edge!(et, invokesig, mi)
             return ConstantCase(quoted(inferred_src.val))
         else
             src = inferred_src # ::Union{Nothing,CodeInfo} for NativeInterpreter
@@ -831,7 +831,7 @@ function resolve_todo(todo::InliningTodo, state::InliningState, flag::UInt8)
         if code isa CodeInstance
             if use_const_api(code)
                 # in this case function can be inlined to a constant
-                et !== nothing && push!(et, invokesig, mi)
+                et !== nothing && add_edge!(et, invokesig, mi)
                 return ConstantCase(quoted(code.rettype_const))
             else
                 src = code.inferred
@@ -853,7 +853,7 @@ function resolve_todo(todo::InliningTodo, state::InliningState, flag::UInt8)
 
     src === nothing && return compileable_specialization(et, match, effects)
 
-    et !== nothing && push!(et, invokesig, mi)
+    et !== nothing && add_edge!(et, invokesig, mi)
     return InliningTodo(mi, retrieve_ir_for_inlining(mi, src), effects)
 end
 
