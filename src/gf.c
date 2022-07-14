@@ -1445,12 +1445,15 @@ static void invalidate_method_instance(void (*f)(jl_code_instance_t*), jl_method
             codeinst->max_world = max_world;
         }
         assert(codeinst->max_world <= max_world);
+        JL_GC_PUSH1(&codeinst);
         (*f)(codeinst);
+        JL_GC_POP();
         codeinst = jl_atomic_load_relaxed(&codeinst->next);
     }
     // recurse to all backedges to update their valid range also
     jl_array_t *backedges = replaced->backedges;
     if (backedges) {
+        JL_GC_PUSH1(&backedges);
         replaced->backedges = NULL;
         size_t i = 0, l = jl_array_len(backedges);
         jl_method_instance_t *replaced;
@@ -1458,6 +1461,7 @@ static void invalidate_method_instance(void (*f)(jl_code_instance_t*), jl_method
             i = get_next_backedge(backedges, i, NULL, &replaced);
             invalidate_method_instance(f, replaced, max_world, depth + 1);
         }
+        JL_GC_POP();
     }
     JL_UNLOCK(&replaced->def.method->writelock);
 }

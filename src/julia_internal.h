@@ -551,7 +551,7 @@ JL_DLLEXPORT jl_code_info_t *jl_new_code_info_uninit(void);
 void jl_resolve_globals_in_ir(jl_array_t *stmts, jl_module_t *m, jl_svec_t *sparam_vals,
                               int binding_effects);
 
-int get_next_backedge(jl_array_t *list, int i, jl_value_t** invokesig, jl_method_instance_t **caller);
+int get_next_backedge(jl_array_t *list, int i, jl_value_t** invokesig, jl_method_instance_t **caller) JL_NOTSAFEPOINT;
 int set_next_backedge(jl_array_t *list, int i, jl_value_t *invokesig, jl_method_instance_t *caller);
 void push_backedge(jl_array_t *list, jl_value_t *invokesig, jl_method_instance_t *caller);
 

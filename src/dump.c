@@ -2304,7 +2304,7 @@ void remove_code_instance_from_validation(jl_code_instance_t *codeinst)
     ptrhash_remove(&new_code_instance_validate, codeinst);
 }
 
-static void jl_insert_method_instances(jl_array_t *list)
+static void jl_insert_method_instances(jl_array_t *list) JL_GC_DISABLED
 {
     size_t i, l = jl_array_len(list);
     // Validate the MethodInstances
