@@ -1849,8 +1849,9 @@ function builtin_effects(f::Builtin, argtypes::Vector{Any}, @nospecialize(rt))
         nothrow = (!(!isempty(argtypes) && isvarargtype(argtypes[end])) && builtin_nothrow(f, argtypes, rt)) ?
             ALWAYS_TRUE : ALWAYS_FALSE
     end
+    noglobal = ALWAYS_FALSE
 
-    return Effects(EFFECTS_TOTAL; consistent, effect_free, nothrow)
+    return Effects(EFFECTS_TOTAL; consistent, effect_free, nothrow, noglobal)
 end
 
 function builtin_nothrow(@nospecialize(f), argtypes::Vector{Any}, @nospecialize(rt))

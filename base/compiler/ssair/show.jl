@@ -808,6 +808,8 @@ function Base.show(io::IO, e::Core.Compiler.Effects)
     printstyled(io, string(tristate_letter(e.terminates), 't'); color=tristate_color(e.terminates))
     print(io, ',')
     printstyled(io, string(tristate_letter(e.notaskstate), 's'); color=tristate_color(e.notaskstate))
+    print(io, ',')
+    printstyled(io, string(tristate_letter(e.noglobal), 'g'); color=tristate_color(e.noglobal))
     print(io, ')')
     e.nonoverlayed || printstyled(io, '′'; color=:red)
 end
