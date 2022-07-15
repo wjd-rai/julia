@@ -437,6 +437,13 @@ function adjust_effects(sv::InferenceState)
         consistent = TriState(ipo_effects.consistent.state & ~(CONSISTENT_IF_NOT_RETURNED.state))
         ipo_effects = Effects(ipo_effects; consistent)
     end
+    if is_effect_free_if_noglobal(ipo_effects.effect_free)
+        if ipo_effects.noglobal !== ALWAYS_TRUE
+            ipo_effects = Effects(ipo_effects; effect_free=ALWAYS_FALSE)
+        elseif all(i::Int->is_effect_free_argtype(sv.slottypes[i]), 1:narguments(sv))
+            ipo_effects = Effects(ipo_effects; effect_free=ALWAYS_TRUE)
+        end
+    end
 
     # override the analyzed effects using manually annotated effect settings
     def = sv.linfo.def

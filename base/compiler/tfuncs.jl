@@ -1893,8 +1893,12 @@ function builtin_effects(f::Builtin, argtypes::Vector{Any}, @nospecialize(rt))
         return getglobal_effects(argtypes, rt)
     else
         consistent = contains_is(_CONSISTENT_BUILTINS, f) ? ALWAYS_TRUE : ALWAYS_FALSE
-        effect_free = (contains_is(_EFFECT_FREE_BUILTINS, f) || contains_is(_PURE_BUILTINS, f)) ?
-            ALWAYS_TRUE : ALWAYS_FALSE
+        if f === setfield! || f === arrayset
+            effect_free = EFFECT_FREE_IF_NOGLOBAL
+        else
+            effect_free = (contains_is(_EFFECT_FREE_BUILTINS, f) || contains_is(_PURE_BUILTINS, f)) ?
+                ALWAYS_TRUE : ALWAYS_FALSE
+        end
         nothrow = (!(!isempty(argtypes) && isvarargtype(argtypes[end])) && builtin_nothrow(f, argtypes, rt)) ?
             ALWAYS_TRUE : ALWAYS_FALSE
         noglobal = contains_is(_NOGLOBAL_BUILTINS, f) ? ALWAYS_TRUE : ALWAYS_FALSE

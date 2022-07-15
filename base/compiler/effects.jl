@@ -3,6 +3,7 @@ const ALWAYS_FALSE = TriState(0x00)
 const ALWAYS_TRUE  = TriState(0x01)
 const CONSISTENT_IF_NOT_RETURNED = TriState(0x01 << 1)
 const CONSISTENT_IF_NOGLOBAL = TriState(0x01 << 2)
+const EFFECT_FREE_IF_NOGLOBAL = TriState(0x01 << 1)
 
 function tristate_merge(old::TriState, new::TriState)
     if old === ALWAYS_FALSE || new === ALWAYS_FALSE
@@ -148,6 +149,9 @@ function is_consistent(effects::Effects, argtypes::Vector{Any})
     end
     return false
 end
+
+is_effect_free_if_noglobal(effect_free::TriState) =
+    !iszero(effect_free.state & EFFECT_FREE_IF_NOGLOBAL.state)
 
 is_consistent_if_noglobal(consistent::TriState) =
     !iszero(consistent.state & CONSISTENT_IF_NOGLOBAL.state)
