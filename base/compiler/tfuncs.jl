@@ -749,6 +749,7 @@ function getfield_boundscheck(argtypes::Vector{Any}) # ::Union{Bool, Nothing, Ty
     else
         return nothing
     end
+    isvarargtype(boundscheck) && return nothing
     widenconst(boundscheck) !== Bool && return nothing
     boundscheck = widenconditional(boundscheck)
     if isa(boundscheck, Const)
@@ -1798,6 +1799,35 @@ const _SPECIAL_BUILTINS = Any[
     Core._apply_iterate
 ]
 
+is_immutable_ty(@nospecialize ty) = _is_immutable_ty(unwrap_unionall(ty))
+function _is_immutable_ty(@nospecialize ty)
+    if isa(ty, Union)
+        return _is_immutable_ty(ty.a) && _is_immutable_ty(ty.b)
+    end
+    return !isabstracttype(ty) && !ismutabletype(ty)
+end
+
+function isdefined_effects(argtypes::Vector{Any})
+    # consistent if the first arg is immutable
+    isempty(argtypes) && return EFFECTS_THROWS
+    obj = argtypes[1]
+    isvarargtype(obj) && return Effects(EFFECTS_THROWS; consistent=ALWAYS_FALSE)
+    objt = widenconst(obj)
+    consistent = is_immutable_ty(objt) ? ALWAYS_TRUE : ALWAYS_FALSE
+    nothrow = isdefined_nothrow(argtypes) ? ALWAYS_TRUE : ALWAYS_FALSE
+    return Effects(EFFECTS_TOTAL; consistent, nothrow)
+end
+
+function getglobal_effects(argtypes::Vector{Any}, @nospecialize(rt))
+    if getglobal_nothrow(argtypes)
+        # typeasserts are already checked in `getglobal_nothrow`
+        M, s = (argtypes[1]::Const).val::Module, (argtypes[2]::Const).val::Symbol
+        isconst(M, s) && return EFFECTS_TOTAL
+        return Effects(EFFECTS_TOTAL; consistent=ALWAYS_FALSE)
+    end
+    return Effects(EFFECTS_TOTAL; consistent=ALWAYS_FALSE, nothrow=ALWAYS_FALSE)
+end
+
 function builtin_effects(f::Builtin, argtypes::Vector{Any}, @nospecialize(rt))
     if isa(f, IntrinsicFunction)
         return intrinsic_effects(f, argtypes)
@@ -1805,52 +1835,40 @@ function builtin_effects(f::Builtin, argtypes::Vector{Any}, @nospecialize(rt))
 
     @assert !contains_is(_SPECIAL_BUILTINS, f)
 
-    if (f === Core.getfield || f === Core.isdefined) && length(argtypes) >= 2
+    if f === isdefined
+        return isdefined_effects(argtypes)
+    elseif f === getfield
         # consistent if the argtype is immutable
-        if isvarargtype(argtypes[1])
-            return Effects(; effect_free=ALWAYS_TRUE, terminates=ALWAYS_TRUE, nonoverlayed=true)
-        end
-        s = widenconst(argtypes[1])
-        if isType(s) || !isa(s, DataType) || isabstracttype(s)
-            return Effects(; effect_free=ALWAYS_TRUE, terminates=ALWAYS_TRUE, nonoverlayed=true)
-        end
-        s = s::DataType
-        consistent = !ismutabletype(s) ? ALWAYS_TRUE : ALWAYS_FALSE
-        if f === Core.getfield && !isvarargtype(argtypes[end]) && getfield_boundscheck(argtypes) !== true
+        isempty(argtypes) && return EFFECTS_THROWS
+        obj = argtypes[1]
+        isvarargtype(obj) && return Effects(EFFECTS_THROWS; consistent=ALWAYS_FALSE)
+        objt = widenconst(obj)
+        consistent = is_immutable_ty(objt) ? ALWAYS_TRUE : ALWAYS_FALSE
+        if getfield_boundscheck(argtypes) !== true
             # If we cannot independently prove inboundsness, taint consistency.
             # The inbounds-ness assertion requires dynamic reachability, while
             # :consistent needs to be true for all input values.
             # N.B. We do not taint for `--check-bounds=no` here -that happens in
             # InferenceState.
-            if getfield_nothrow(argtypes[1], argtypes[2], true)
+            if length(argtypes) ≥ 2 && getfield_nothrow(argtypes[1], argtypes[2], true)
                 nothrow = ALWAYS_TRUE
             else
                 consistent = nothrow = ALWAYS_FALSE
             end
         else
-            nothrow = (!isvarargtype(argtypes[end]) && builtin_nothrow(f, argtypes, rt)) ?
-                ALWAYS_TRUE : ALWAYS_FALSE
+            nothrow = getfield_nothrow(argtypes) ? ALWAYS_TRUE : ALWAYS_FALSE
         end
-        effect_free = ALWAYS_TRUE
+        return Effects(EFFECTS_TOTAL; consistent, nothrow)
     elseif f === getglobal
-        if getglobal_nothrow(argtypes)
-            consistent = isconst( # types are already checked in `getglobal_nothrow`
-                (argtypes[1]::Const).val::Module, (argtypes[2]::Const).val::Symbol) ?
-                ALWAYS_TRUE : ALWAYS_FALSE
-            nothrow = ALWAYS_TRUE
-        else
-            consistent = nothrow = ALWAYS_FALSE
-        end
-        effect_free = ALWAYS_TRUE
+        return getglobal_effects(argtypes, rt)
     else
         consistent = contains_is(_CONSISTENT_BUILTINS, f) ? ALWAYS_TRUE : ALWAYS_FALSE
         effect_free = (contains_is(_EFFECT_FREE_BUILTINS, f) || contains_is(_PURE_BUILTINS, f)) ?
             ALWAYS_TRUE : ALWAYS_FALSE
         nothrow = (!(!isempty(argtypes) && isvarargtype(argtypes[end])) && builtin_nothrow(f, argtypes, rt)) ?
             ALWAYS_TRUE : ALWAYS_FALSE
+        return Effects(EFFECTS_TOTAL; consistent, effect_free, nothrow)
     end
-
-    return Effects(EFFECTS_TOTAL; consistent, effect_free, nothrow)
 end
 
 function builtin_nothrow(@nospecialize(f), argtypes::Vector{Any}, @nospecialize(rt))
