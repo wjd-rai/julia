@@ -6,6 +6,7 @@ import .Main.OffsetArrays: IdOffsetRange
 using Random
 using LinearAlgebra
 using Base: IdentityUnitRange
+using Test
 
 if !isdefined(@__MODULE__, :T24Linear)
     include("testhelpers/arrayindexingtypes.jl")
@@ -242,7 +243,7 @@ targets2 = ["(fill(1.0), fill(1.0))",
 end
 P = OffsetArray(rand(8,8), (1,1))
 PV = view(P, 2:3, :)
-@test endswith(summary(PV), "with indices Base.OneTo(2)×OffsetArrays.IdOffsetRange(2:9)")
+@test endswith(summary(PV), "with indices Base.OneTo(2)×$(repr(axes(P,2)))")
 
 # Similar
 B = similar(A, Float32)
@@ -412,6 +413,23 @@ rv = reverse(v)
 @test rv[-2] == v[1]
 cv = copy(v)
 @test reverse!(cv) == rv
+
+@testset "reverse! (issue #45870)" begin
+    @testset for n in [4,5]
+        offset = typemax(Int)-n
+        vo = OffsetArray([1:n;], offset)
+        vo2 = OffsetArray([1:n;], offset)
+        @test reverse!(vo) == OffsetArray(n:-1:1, offset)
+        @test reverse!(vo) == vo2
+        @test_throws BoundsError reverse!(vo, firstindex(vo)-1, firstindex(vo))
+        @test reverse!(vo, firstindex(vo), firstindex(vo)-1) == vo2
+        @test reverse!(vo, firstindex(vo), firstindex(vo)) == vo2
+        @test reverse!(vo, lastindex(vo), lastindex(vo)) == vo2
+        @test reverse!(vo, lastindex(vo), lastindex(vo)+1) == vo2 # overflow in stop
+        @test reverse!(vo, firstindex(vo)+1) == OffsetArray([1;n:-1:2], offset)
+        @test reverse!(vo2, firstindex(vo)+1, lastindex(vo)-1) == OffsetArray([1;n-1:-1:2;n], offset)
+    end
+end
 
 A = OffsetArray(rand(4,4), (-3,5))
 @test lastindex(A) == 16

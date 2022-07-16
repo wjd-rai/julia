@@ -32,6 +32,7 @@ Base.include
 Base.MainInclude.include
 Base.include_string
 Base.include_dependency
+__init__
 Base.which(::Any, ::Any)
 Base.methods
 Base.@show
@@ -172,6 +173,7 @@ Base.isdispatchtuple
 ```@docs
 Base.ismutable
 Base.isimmutable
+Base.ismutabletype
 Base.isabstracttype
 Base.isprimitivetype
 Base.issingletontype

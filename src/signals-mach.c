@@ -41,6 +41,8 @@ static void attach_exception_port(thread_port_t thread, int segv_only);
 
 // low 16 bits are the thread id, the next 8 bits are the original gc_state
 static arraylist_t suspended_threads;
+extern uv_mutex_t safepoint_lock;
+extern uv_cond_t safepoint_cond;
 void jl_mach_gc_end(void)
 {
     // Requires the safepoint lock to be held
@@ -605,10 +607,11 @@ void *mach_profile_listener(void *arg)
         // sample each thread, round-robin style in reverse order
         // (so that thread zero gets notified last)
         int keymgr_locked = jl_lock_profile_mach(0);
-        jl_shuffle_int_array_inplace(profile_round_robin_thread_order, jl_n_threads, &profile_cong_rng_seed);
+
+        int *randperm = profile_get_randperm(jl_n_threads);
         for (int idx = jl_n_threads; idx-- > 0; ) {
-            // Stop the threads in the random round-robin order.
-            int i = profile_round_robin_thread_order[idx];
+            // Stop the threads in the random or reverse round-robin order.
+            int i = randperm[idx];
             // if there is no space left, break early
             if (jl_profile_is_buffer_full()) {
                 jl_profile_stop_timer();
