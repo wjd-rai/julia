@@ -391,7 +391,7 @@ function locate_package(pkg::PkgId, stopenv::Union{String, Nothing}=nothing)::Un
             # missing is used as a sentinel to stop looking further down in envs
             path === missing && return nothing
             path === nothing || return entry_path(path, pkg.name)
-            stopenv == env && return nothing
+            stopenv == env && break
         end
         # Allow loading of stdlibs if the name/uuid are given
         # e.g. if they have been explicitly added to the project/manifest
@@ -1322,9 +1322,9 @@ function require(into::Module, mod::Symbol)
     @lock require_lock begin
     LOADING_CACHE[] = LoadingCache()
     try
-        uuidkey, env = identify_package_env(into, String(mod))
+        uuidkey_env = identify_package_env(into, String(mod))
         # Core.println("require($(PkgId(into)), $mod) -> $uuidkey from env \"$env\"")
-        if uuidkey === nothing
+        if uuidkey_env === nothing
             where = PkgId(into)
             if where.uuid === nothing
                 hint, dots = begin
@@ -1352,6 +1352,7 @@ function require(into::Module, mod::Symbol)
                 - Otherwise you may need to report an issue with $(where.name)"""))
             end
         end
+        uuidkey, env = uuidkey_env
         if _track_dependencies[]
             push!(_require_dependencies, (into, binpack(uuidkey), 0.0))
         end
@@ -2347,7 +2348,7 @@ end
         end
 
         curr_weak_deps = collect_installed_weak_deps(id)
-        
+
         if Set(values(curr_weak_deps)) != weak_deps
             wd_str = join(weak_deps, ", ")
             cwd_str = join(values(curr_weak_deps), ", ")
