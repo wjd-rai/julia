@@ -581,7 +581,7 @@ end
             closewrite(s)
             @test !iswritable(s)
             @test isreadable(s)
-            @test read(s, String) == "hello world\n"
+            @test_broken read(s, String) == "hello world\n" # half-open state not currently supported for PipeEndpoint or TCP
             @test !isreadable(s)
             @test !isopen(s)
             close(s)
