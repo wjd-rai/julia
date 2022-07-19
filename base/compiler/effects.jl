@@ -1,12 +1,14 @@
 struct TriState; state::UInt8; end
-const ALWAYS_FALSE     = TriState(0x00)
-const ALWAYS_TRUE      = TriState(0x01)
-const TRISTATE_UNKNOWN = TriState(0x02)
+const ALWAYS_FALSE = TriState(0x00)
+const ALWAYS_TRUE  = TriState(0x01)
+const CONSISTENT_IF_NOT_RETURNED = TriState(0x01 << 1)
+const CONSISTENT_IF_NOGLOBAL = TriState(0x01 << 2)
 
 function tristate_merge(old::TriState, new::TriState)
-    (old === ALWAYS_FALSE || new === ALWAYS_FALSE) && return ALWAYS_FALSE
-    old === TRISTATE_UNKNOWN && return old
-    return new
+    if old === ALWAYS_FALSE || new === ALWAYS_FALSE
+        return ALWAYS_FALSE
+    end
+    return TriState(old.state | new.state)
 end
 
 """
@@ -120,6 +122,10 @@ is_foldable(effects::Effects) =
     is_consistent(effects) &&
     is_effect_free(effects) &&
     is_terminates(effects)
+is_foldable(effects::Effects, argtypes::Vector{Any}) =
+    is_consistent(effects, argtypes) &&
+    is_effect_free(effects) &&
+    is_terminates(effects)
 
 is_total(effects::Effects) =
     is_foldable(effects) &&
@@ -130,25 +136,45 @@ is_removable_if_unused(effects::Effects) =
     is_terminates(effects) &&
     is_nothrow(effects)
 
+is_consistent_if_not_returned(consistent::TriState) =
+    !iszero(consistent.state & CONSISTENT_IF_NOT_RETURNED.state)
+is_consistent_if_not_returned(effects::Effects) =
+    is_consistent_if_not_returned(effects.consistent)
+
+function is_consistent(effects::Effects, argtypes::Vector{Any})
+    is_consistent(effects) && return true
+    if is_consistent_if_noglobal(effects, argtypes)
+        return is_noglobal(effects)
+    end
+    return false
+end
+
+is_consistent_if_noglobal(consistent::TriState) =
+    !iszero(consistent.state & CONSISTENT_IF_NOGLOBAL.state)
+is_consistent_if_noglobal(effects::Effects, argtypes::Vector{Any}) =
+    !is_consistent_if_not_returned(effects) &&
+    is_consistent_if_noglobal(effects.consistent) &&
+    all(is_effect_free_argtype, argtypes)
+
 function encode_effects(e::Effects)
     return ((e.consistent.state)           << 0) |
-           ((e.effect_free.state)          << 2) |
-           ((e.nothrow.state)              << 4) |
-           ((e.terminates.state)           << 6) |
-           ((e.nonoverlayed % UInt32)      << 8) |
-           ((e.notaskstate.state % UInt32) << 9) |
-           ((e.noglobal.state % UInt32)    << 11)
+           ((e.effect_free.state)          << 3) |
+           ((e.nothrow.state)              << 5) |
+           ((e.terminates.state)           << 7) |
+           ((e.nonoverlayed % UInt32)      << 9) |
+           ((e.notaskstate.state % UInt32) << 10) |
+           ((e.noglobal.state % UInt32)    << 12)
 end
 
 function decode_effects(e::UInt32)
     return Effects(
-        TriState((e >> 0)  & 0x03),
-        TriState((e >> 2)  & 0x03),
-        TriState((e >> 4)  & 0x03),
-        TriState((e >> 6)  & 0x03),
-        _Bool(   (e >> 8)  & 0x01),
-        TriState((e >> 9)  & 0x03),
-        TriState((e >> 11) & 0x03))
+        TriState((e >> 0)  & 0x07),
+        TriState((e >> 3)  & 0x03),
+        TriState((e >> 5)  & 0x03),
+        TriState((e >> 7)  & 0x03),
+        _Bool(   (e >> 9)  & 0x01),
+        TriState((e >> 10)  & 0x03),
+        TriState((e >> 12) & 0x03))
 end
 
 function tristate_merge(old::Effects, new::Effects)

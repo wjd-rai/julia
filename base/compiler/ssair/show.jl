@@ -790,12 +790,29 @@ function show_ir(io::IO, code::Union{IRCode, CodeInfo}, config::IRShowConfig=def
     nothing
 end
 
-tristate_letter(t::TriState) = t === ALWAYS_TRUE ? '+' : t === ALWAYS_FALSE ? '!' : '?'
-tristate_color(t::TriState) = t === ALWAYS_TRUE ? :green : t === ALWAYS_FALSE ? :red : :yellow
+function tristate_letter(t::TriState)
+    t === ALWAYS_FALSE && return "!"
+    t === ALWAYS_TRUE && return "+"
+    r = ""
+    if Core.Compiler.is_consistent_if_not_returned(t)
+        r *= "↑"
+    end
+    if Core.Compiler.is_consistent_if_noglobal(t)
+        r *= "⊝"
+    end
+    return r
+end
+
+tristate_color(t::TriState) =
+    t === ALWAYS_TRUE ? :green :
+    t === ALWAYS_FALSE ? :red :
+    :yellow
 tristate_repr(t::TriState) =
     t === ALWAYS_TRUE ? "ALWAYS_TRUE" :
     t === ALWAYS_FALSE ? "ALWAYS_FALSE" :
-    t === TRISTATE_UNKNOWN ? "TRISTATE_UNKNOWN" : nothing
+    t === CONSISTENT_IF_NOT_RETURNED ? "CONSISTENT_IF_NOT_RETURNED" :
+    t === CONSISTENT_IF_NOGLOBAL ? "CONSISTENT_IF_NOGLOBAL" :
+    nothing
 
 function Base.show(io::IO, e::Core.Compiler.Effects)
     print(io, "(")

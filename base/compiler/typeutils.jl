@@ -301,18 +301,37 @@ function unwraptv(@nospecialize t)
     return t
 end
 
-is_consistent_argtype(@nospecialize ty) = is_consistent_type(widenconst(ignorelimited(unwrap_unionall(ty))))
-function is_consistent_type(@nospecialize ty)
-    if isa(ty, Union)
-        return is_consistent_type(ty.a) && is_consistent_type(ty.b)
+is_consistent_argtype(@nospecialize argtype) =
+    is_consistent_type(widenconst(ignorelimited(argtype)))
+is_consistent_type(@nospecialize type) =
+    _is_consistent_type(unwrap_unionall(type))
+function _is_consistent_type(@nospecialize type)
+    if isa(type, Union)
+        return is_consistent_type(type.a) && is_consistent_type(type.b)
     end
-    return ty === Symbol || isbitstype(ty)
+    return type === Symbol || isbitstype(type)
 end
 
-is_immutable_argtype(@nospecialize ty) = is_immutable_type(widenconst(ignorelimited(unwrap_unionall(ty))))
-function is_immutable_type(@nospecialize ty)
-    if isa(ty, Union)
-        return is_immutable_type(ty.a) && is_immutable_type(ty.b)
+is_immutable_argtype(@nospecialize argtype) =
+    is_immutable_type(widenconst(ignorelimited(argtype)))
+is_immutable_type(@nospecialize type) =
+    _is_immutable_type(unwrap_unionall(type))
+function _is_immutable_type(@nospecialize type)
+    if isa(type, Union)
+        return is_immutable_type(type.a) && is_immutable_type(type.b)
     end
-    return !isabstracttype(ty) && !ismutabletype(ty)
+    return !isabstracttype(type) && !ismutabletype(type)
+end
+
+is_effect_free_argtype(@nospecialize argtype) =
+    is_effect_free_type(widenconst(ignorelimited(argtype)))
+is_effect_free_type(@nospecialize type) =
+    _is_effect_free_type(unwrap_unionall(type))
+function _is_effect_free_type(@nospecialize type)
+    if isa(type, Union)
+        return _is_effect_free_type(type.a) && _is_effect_free_type(type.b)
+    end
+    return isType(type) || type === DataType ||
+           type === String || type === Symbol ||
+           isbitstype(type)
 end

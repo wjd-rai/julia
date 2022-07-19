@@ -430,11 +430,12 @@ function adjust_effects(sv::InferenceState)
         # always throwing an error counts or never returning both count as consistent
         ipo_effects = Effects(ipo_effects; consistent=ALWAYS_TRUE)
     end
-    if ipo_effects.consistent === TRISTATE_UNKNOWN && is_consistent_argtype(rt)
+    if is_consistent_if_not_returned(ipo_effects) && is_consistent_argtype(rt)
         # in a case when the :consistent-cy here is only tainted by mutable allocations
-        # (indicated by `TRISTATE_UNKNOWN`), we may be able to refine it if the return
-        # type guarantees that the allocations are never returned
-        ipo_effects = Effects(ipo_effects; consistent=ALWAYS_TRUE)
+        # (indicated by `is_consistent_if_not_returned`), we may be able to refine it
+        # if the return type guarantees that the allocations are never returned
+        consistent = TriState(ipo_effects.consistent.state & ~(CONSISTENT_IF_NOT_RETURNED.state))
+        ipo_effects = Effects(ipo_effects; consistent)
     end
 
     # override the analyzed effects using manually annotated effect settings

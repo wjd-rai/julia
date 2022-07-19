@@ -780,7 +780,7 @@ function concrete_eval_eligible(interp::AbstractInterpreter,
     isoverlayed(method_table(interp)) && !is_nonoverlayed(result.effects) && return false
     return f !== nothing &&
            result.edge !== nothing &&
-           is_foldable(result.effects) &&
+           is_foldable(result.effects, arginfo.argtypes) &&
            is_all_const_arg(arginfo)
 end
 
@@ -2007,7 +2007,7 @@ function abstract_eval_statement(interp::AbstractInterpreter, @nospecialize(e), 
             is_nothrow = false
         end
         tristate_merge!(sv, Effects(EFFECTS_TOTAL;
-            consistent = !ismutabletype(t) ? ALWAYS_TRUE : TRISTATE_UNKNOWN,
+            consistent = !ismutabletype(t) ? ALWAYS_TRUE : CONSISTENT_IF_NOT_RETURNED,
             nothrow = is_nothrow ? ALWAYS_TRUE : ALWAYS_FALSE))
     elseif ehead === :splatnew
         t, isexact = instanceof_tfunc(abstract_eval_value(interp, e.args[1], vtypes, sv))
@@ -2026,7 +2026,7 @@ function abstract_eval_statement(interp::AbstractInterpreter, @nospecialize(e), 
             end
         end
         tristate_merge!(sv, Effects(EFFECTS_TOTAL;
-            consistent = !ismutabletype(t) ? ALWAYS_TRUE : TRISTATE_UNKNOWN,
+            consistent = !ismutabletype(t) ? ALWAYS_TRUE : CONSISTENT_IF_NOT_RETURNED,
             nothrow = is_nothrow ? ALWAYS_TRUE : ALWAYS_FALSE))
     elseif ehead === :new_opaque_closure
         tristate_merge!(sv, Effects()) # TODO
@@ -2151,7 +2151,11 @@ function abstract_eval_global(M::Module, s::Symbol, frame::InferenceState)
     rt = abstract_eval_global(M, s)
     consistent = nothrow = noglobal = ALWAYS_FALSE
     if isa(rt, Const)
-        consistent = nothrow = ALWAYS_TRUE
+        if is_effect_free_argtype(rt)
+            consistent = nothrow = noglobal = ALWAYS_TRUE
+        else
+            consistent = nothrow = ALWAYS_TRUE
+        end
     elseif isdefined(M,s)
         nothrow = ALWAYS_TRUE
     end

@@ -178,13 +178,13 @@ global nonconstant_global_variable::Int = 42
 @test Base.infer_effects() do
     constant_global_variable
 end |> Core.Compiler.is_noglobal
-@test_broken Base.infer_effects() do
+@test Base.infer_effects() do
     getglobal(@__MODULE__, :constant_global_variable)
 end |> Core.Compiler.is_noglobal
 @test Base.infer_effects() do
     nonconstant_global_variable
 end |> !Core.Compiler.is_noglobal
-@test_broken Base.infer_effects() do
+@test Base.infer_effects() do
     getglobal(@__MODULE__, :nonconstant_global_variable)
 end |> !Core.Compiler.is_noglobal
 @test Base.infer_effects((Symbol,)) do name
@@ -198,6 +198,52 @@ end |> !Core.Compiler.is_noglobal
 end |> !Core.Compiler.is_noglobal
 
 # `getfield` effects
+# ==================
+
+# tries to prove consistency of frames including access to mutable objects,
+# using the :noglobal effect and is_effect_free_argtype query
+
+mutable struct SafeRef{T}
+    x::T
+end
+Base.getindex(x::SafeRef) = x.x;
+Base.setindex!(x::SafeRef, v) = x.x = v;
+Base.isassigned(x::SafeRef) = true;
+
+function mutable_consistent(s)
+    SafeRef(s)[]
+end
+@test Core.Compiler.is_noglobal(Base.infer_effects(mutable_consistent, (Symbol,)))
+@test fully_eliminated(; retval=QuoteNode(:foo)) do
+    mutable_consistent(:foo)
+end
+
+function nested_mutable_consistent(s)
+    SafeRef(SafeRef(SafeRef(SafeRef(SafeRef(s)))))[][][][][]
+end
+@test Core.Compiler.is_noglobal(Base.infer_effects(nested_mutable_consistent, (Symbol,)))
+@test fully_eliminated(; retval=QuoteNode(:foo)) do
+    nested_mutable_consistent(:foo)
+end
+
+const consistent_global = Some(:foo)
+@test Base.infer_effects() do
+    consistent_global.value
+end |> Core.Compiler.is_consistent
+
+const inconsistent_global = SafeRef(:foo)
+@test Base.infer_effects() do
+    inconsistent_global[]
+end |> !Core.Compiler.is_consistent
+
+global inconsistent_condition_ref = Ref{Bool}(false)
+@test Base.infer_effects() do
+    if inconsistent_condition_ref[]
+        return 0
+    else
+        return 1
+    end
+end |> !Core.Compiler.is_consistent
 
 # handle union object nicely
 @test Core.Compiler.is_consistent(Core.Compiler.getfield_effects(Any[Some{String}, Core.Const(:value)], String))

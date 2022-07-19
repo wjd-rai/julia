@@ -2567,7 +2567,8 @@ module IRShow
     import ..Base
     import .Compiler: IRCode, ReturnNode, GotoIfNot, CFG, scan_ssa_use!, Argument,
         isexpr, compute_basic_blocks, block_for_inst,
-        TriState, Effects, ALWAYS_TRUE, ALWAYS_FALSE, TRISTATE_UNKNOWN
+        TriState, Effects, ALWAYS_TRUE, ALWAYS_FALSE, CONSISTENT_IF_NOT_RETURNED,
+        CONSISTENT_IF_NOGLOBAL
     Base.getindex(r::Compiler.StmtRange, ind::Integer) = Compiler.getindex(r, ind)
     Base.size(r::Compiler.StmtRange) = Compiler.size(r)
     Base.first(r::Compiler.StmtRange) = Compiler.first(r)
