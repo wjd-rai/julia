@@ -931,8 +931,9 @@ hasdep(m::Module, deps::Symbol...) = hasdep(PkgId(m), deps...)
 
 function hasdep(pkg::PkgId, deps::Symbol...)
     for dep in deps
-        wpkg, env = identify_package_env(pkg, String(dep))
-        wpkg === nothing && return false
+        wpkg_env = identify_package_env(pkg, String(dep))
+        wpkg_env === nothing && return false
+        wpkg, env = wpkg_env
         locate_package(wpkg, env) === nothing && return false
     end
     return true
