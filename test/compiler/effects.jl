@@ -171,3 +171,14 @@ let effects = Base.infer_effects(f_setfield_nothrow, ())
     #@test Core.Compiler.is_effect_free(effects)
     @test Core.Compiler.is_nothrow(effects)
 end
+
+# `getfield` effects
+
+# handle union object nicely
+@test Core.Compiler.is_consistent(Core.Compiler.getfield_effects(Any[Some{String}, Core.Const(:value)], String))
+@test Core.Compiler.is_consistent(Core.Compiler.getfield_effects(Any[Some{Symbol}, Core.Const(:value)], Symbol))
+@test Core.Compiler.is_consistent(Core.Compiler.getfield_effects(Any[Union{Some{Symbol},Some{String}}, Core.Const(:value)], Union{Symbol,String}))
+@test Base.infer_effects((Bool,)) do c
+    obj = c ? Some{String}("foo") : Some{Symbol}(:bar)
+    return getfield(obj, :value)
+end |> Core.Compiler.is_consistent

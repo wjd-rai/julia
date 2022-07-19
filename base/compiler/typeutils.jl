@@ -300,3 +300,19 @@ function unwraptv(@nospecialize t)
     end
     return t
 end
+
+is_consistent_argtype(@nospecialize ty) = is_consistent_type(widenconst(ignorelimited(unwrap_unionall(ty))))
+function is_consistent_type(@nospecialize ty)
+    if isa(ty, Union)
+        return is_consistent_type(ty.a) && is_consistent_type(ty.b)
+    end
+    return ty === Symbol || isbitstype(ty)
+end
+
+is_immutable_argtype(@nospecialize ty) = is_immutable_type(widenconst(ignorelimited(unwrap_unionall(ty))))
+function is_immutable_type(@nospecialize ty)
+    if isa(ty, Union)
+        return is_immutable_type(ty.a) && is_immutable_type(ty.b)
+    end
+    return !isabstracttype(ty) && !ismutabletype(ty)
+end
