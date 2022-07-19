@@ -57,7 +57,7 @@ function Core.OpaqueClosure(ir::IRCode, env...;
     # NOTE: we need ir.argtypes[1] == typeof(env)
 
     ccall(:jl_new_opaque_closure_from_code_info, Any, (Any, Any, Any, Any, Any, Cint, Any, Cint, Cint, Any),
-          Tuple{ir.argtypes[2:end]...}, Union{}, rt, @__MODULE__, src, 0, nothing, nargs, isva, env)
+          Tuple{map(Core.Compiler.widenconst, ir.argtypes[2:end])...}, Union{}, rt, @__MODULE__, src, 0, nothing, nargs, isva, env)
 end
 
 function Core.OpaqueClosure(src::CodeInfo, env...)
