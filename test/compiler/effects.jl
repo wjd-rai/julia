@@ -172,6 +172,31 @@ let effects = Base.infer_effects(f_setfield_nothrow, ())
     @test Core.Compiler.is_nothrow(effects)
 end
 
+# :noglobal effect
+const global constant_global_variable::Int = 42
+global nonconstant_global_variable::Int = 42
+@test Base.infer_effects() do
+    constant_global_variable
+end |> Core.Compiler.is_noglobal
+@test_broken Base.infer_effects() do
+    getglobal(@__MODULE__, :constant_global_variable)
+end |> Core.Compiler.is_noglobal
+@test Base.infer_effects() do
+    nonconstant_global_variable
+end |> !Core.Compiler.is_noglobal
+@test_broken Base.infer_effects() do
+    getglobal(@__MODULE__, :nonconstant_global_variable)
+end |> !Core.Compiler.is_noglobal
+@test Base.infer_effects((Symbol,)) do name
+    getglobal(@__MODULE__, name)
+end |> !Core.Compiler.is_noglobal
+@test Base.infer_effects((Int,)) do v
+    global nonconstant_global_variable = v
+end |> !Core.Compiler.is_noglobal
+@test Base.infer_effects((Int,)) do v
+    setglobal!(@__MODULE__, :nonconstant_global_variable, v)
+end |> !Core.Compiler.is_noglobal
+
 # `getfield` effects
 
 # handle union object nicely

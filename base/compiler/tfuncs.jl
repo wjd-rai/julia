@@ -1829,11 +1829,12 @@ function getfield_effects(argtypes::Vector{Any}, @nospecialize(rt))
     else
         nothrow = getfield_nothrow(argtypes) ? ALWAYS_TRUE : ALWAYS_FALSE
     end
-    return Effects(EFFECTS_TOTAL; consistent, nothrow)
+    noglobal = ALWAYS_FALSE
+    return Effects(EFFECTS_TOTAL; consistent, nothrow, noglobal)
 end
 
 function getglobal_effects(argtypes::Vector{Any}, @nospecialize(rt))
-    consistent = nothrow = ALWAYS_FALSE
+    consistent = nothrow = noglobal = ALWAYS_FALSE
     if getglobal_nothrow(argtypes)
         # typeasserts below are already checked in `getglobal_nothrow`
         M, s = (argtypes[1]::Const).val::Module, (argtypes[2]::Const).val::Symbol
@@ -1843,7 +1844,7 @@ function getglobal_effects(argtypes::Vector{Any}, @nospecialize(rt))
             nothrow = ALWAYS_TRUE
         end
     end
-    return Effects(EFFECTS_TOTAL; consistent, nothrow)
+    return Effects(EFFECTS_TOTAL; consistent, nothrow, noglobal)
 end
 
 function builtin_effects(f::Builtin, argtypes::Vector{Any}, @nospecialize(rt))
@@ -1865,7 +1866,8 @@ function builtin_effects(f::Builtin, argtypes::Vector{Any}, @nospecialize(rt))
             ALWAYS_TRUE : ALWAYS_FALSE
         nothrow = (!(!isempty(argtypes) && isvarargtype(argtypes[end])) && builtin_nothrow(f, argtypes, rt)) ?
             ALWAYS_TRUE : ALWAYS_FALSE
-        return Effects(EFFECTS_TOTAL; consistent, effect_free, nothrow)
+        noglobal = ALWAYS_FALSE
+        return Effects(EFFECTS_TOTAL; consistent, effect_free, nothrow, noglobal)
     end
 end
 

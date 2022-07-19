@@ -2070,7 +2070,8 @@ function abstract_eval_statement(interp::AbstractInterpreter, @nospecialize(e), 
                 override.nothrow             ? ALWAYS_TRUE : effects.nothrow,
                 override.terminates_globally ? ALWAYS_TRUE : effects.terminates_globally,
                 effects.nonoverlayed         ? true        : false,
-                override.notaskstate         ? ALWAYS_TRUE : effects.notaskstate)
+                override.notaskstate         ? ALWAYS_TRUE : effects.notaskstate,
+                override.noglobal            ? ALWAYS_TRUE : effects.noglobal)
         end
         tristate_merge!(sv, effects)
     elseif ehead === :cfunction
@@ -2148,13 +2149,13 @@ end
 
 function abstract_eval_global(M::Module, s::Symbol, frame::InferenceState)
     rt = abstract_eval_global(M, s)
-    consistent = nothrow = ALWAYS_FALSE
+    consistent = nothrow = noglobal = ALWAYS_FALSE
     if isa(rt, Const)
         consistent = nothrow = ALWAYS_TRUE
     elseif isdefined(M,s)
         nothrow = ALWAYS_TRUE
     end
-    tristate_merge!(frame, Effects(EFFECTS_TOTAL; consistent, nothrow))
+    tristate_merge!(frame, Effects(EFFECTS_TOTAL; consistent, nothrow, noglobal))
     return rt
 end
 
@@ -2162,6 +2163,7 @@ function handle_global_assignment!(interp::AbstractInterpreter, frame::Inference
     effect_free = ALWAYS_FALSE
     nothrow = global_assignment_nothrow(lhs.mod, lhs.name, newty) ?
         ALWAYS_TRUE : ALWAYS_FALSE
+    noglobal = ALWAYS_FALSE
     tristate_merge!(frame, Effects(EFFECTS_TOTAL; effect_free, nothrow))
 end
 
