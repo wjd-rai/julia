@@ -171,3 +171,42 @@ let effects = Base.infer_effects(f_setfield_nothrow, ())
     #@test Core.Compiler.is_effect_free(effects)
     @test Core.Compiler.is_nothrow(effects)
 end
+
+# :the_exception expression should taint :consistent-cy
+global inconsistent_var::Int = 42
+function throw_inconsistent() # this is still :consistent
+    throw(inconsistent_var)
+end
+function catch_inconsistent()
+    try
+        throw_inconsistent()
+    catch err
+        err
+    end
+end
+@test !Core.Compiler.is_consistent(Base.infer_effects(catch_inconsistent))
+cache_inconsistent() = catch_inconsistent()
+function compare_inconsistent()
+    a = cache_inconsistent()
+    global inconsistent_var = 0
+    b = cache_inconsistent()
+    return a === b
+end
+@test !compare_inconsistent()
+# still we should be able to refine the tainted :consistent-cy using the return type info
+function catch_inconsistent(x)
+    try
+        throw_inconsistent()
+    catch err
+        err
+    end
+    return x
+end
+@test Core.Compiler.is_consistent(Base.infer_effects(catch_inconsistent, (Symbol,)))
+cache_inconsistent(x) = catch_inconsistent(x)
+function compare_inconsistent(x)
+    a = cache_inconsistent(x)
+    b = cache_inconsistent(x)
+    return a === b
+end
+@test compare_inconsistent(:foo)
