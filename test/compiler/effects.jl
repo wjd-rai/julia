@@ -210,3 +210,27 @@ function compare_inconsistent(x)
     return a === b
 end
 @test compare_inconsistent(:foo)
+
+# allocation with uninitialized fields should taint the :consistent-cy
+struct UnsafeSome{T}
+    value::T
+    UnsafeSome{T}() where T = new{T}()
+    UnsafeSome{T}(x) where T = new{T}(x)
+    UnsafeSome(x::T) where T = new{T}(x)
+end
+@test Base.infer_effects() do
+    UnsafeSome{Int}().value
+end |> !Core.Compiler.is_consistent
+let src = code_typed1() do
+        UnsafeSome{Int}().value
+    end
+    @test any(isnew, src.code)
+end
+
+throw_undefined() = throw(UnsafeSome{Int}())
+catch_undefined() = try
+    throw_undefined()
+catch err
+    (err::UnsafeSome{Int}).value
+end
+@test !Core.Compiler.is_consistent(Base.infer_effects(catch_undefined))

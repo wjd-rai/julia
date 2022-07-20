@@ -971,6 +971,22 @@ function _getfield_tfunc(@nospecialize(s00), @nospecialize(name), setfield::Bool
     return rewrap_unionall(R, s00)
 end
 
+function getfield_defined(@nospecialize(obj), @nospecialize(name))
+    isa(name, Const) || return false
+    return _getfield_defined(widenconst(obj), name)
+end
+function _getfield_defined(@nospecialize(typ), name::Const)
+    typ′ = unwrap_unionall(typ)
+    if isa(typ′, Union)
+        return _getfield_defined(rewrap_unionall(typ′.a, typ), name) &&
+               _getfield_defined(rewrap_unionall(typ′.b, typ), name)
+    end
+    isa(typ′, DataType) || return false
+    field = try_compute_fieldidx(typ′, name.val)
+    field === nothing && return false
+    return field ≤ datatype_min_ninitialized(typ′)
+end
+
 function setfield!_tfunc(o, f, v, order)
     @nospecialize
     if !isvarargtype(order)
@@ -1816,6 +1832,10 @@ function builtin_effects(f::Builtin, argtypes::Vector{Any}, @nospecialize(rt))
         end
         s = s::DataType
         consistent = !ismutabletype(s) ? ALWAYS_TRUE : ALWAYS_FALSE
+        # access to undefined field should taint the :consistent-cy
+        if f === Core.getfield && !getfield_defined(s, argtypes[2])
+            consistent = ALWAYS_FALSE
+        end
         if f === Core.getfield && !isvarargtype(argtypes[end]) && getfield_boundscheck(argtypes) !== true
             # If we cannot independently prove inboundsness, taint consistency.
             # The inbounds-ness assertion requires dynamic reachability, while
